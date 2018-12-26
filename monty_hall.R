@@ -64,6 +64,6 @@ monty_plot <-
     plot.background = element_rect(fill = "#f5f5f2", color = NA),
     legend.position = "none")
   
-ggsave("/Users/student/Desktop/monty_plot.jpeg", plot = monty_plot,
+ggsave("figures/monty_plot.jpeg", plot = monty_plot,
        device = "jpeg", width = 8, height = 8, units = "in")
 

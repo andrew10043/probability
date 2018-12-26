@@ -249,9 +249,9 @@ for(i in 2:100){
 }
 
 # Save Files
-anim_save("/Users/student/Desktop/universality_1.gif", animation = part_1,
+anim_save("figures/universality_1.gif", animation = part_1,
           device = "png", width = 15, height = 6, units = "in", res = 300)
 
-anim_save("/Users/student/Desktop/universality_2.gif", animation = part_2,
+anim_save("figures/universality_2.gif", animation = part_2,
           device = "png", width = 15, height = 6, units = "in", res = 300)
 
