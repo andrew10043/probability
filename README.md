@@ -1,2 +1,2 @@
-# probability_examples
+# probability
 Visual representations of probability problems.
