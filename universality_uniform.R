@@ -139,10 +139,10 @@ plot_1b <- ggplot() +
 
 # Convert to GIF and combine
 gif_1a <- animate(plot_1a, device = "png", width = 6, 
-                  height = 6, units = "in", res = 200)
+                  height = 6, units = "in", res = 150)
 
 gif_1b <- animate(plot_1b, device = "png", width = 6,
-                  height = 6, units = "in", res = 200)
+                  height = 6, units = "in", res = 150)
 
 mgif_1a <- image_read(gif_1a)
 mgif_1b <- image_read(gif_1b)
@@ -238,11 +238,11 @@ plot_2b <- ggplot() +
 # Convert to GIF and combine
 gif_2a <- animate(plot_2a, device = "png", 
                   width = 6, height = 6, 
-                  units = "in", res = 200)
+                  units = "in", res = 150)
 
 gif_2b <- animate(plot_2b, device = "png",
                   width = 6, height = 6,
-                  units = "in", res = 200)
+                  units = "in", res = 150)
 
 mgif_2a <- image_read(gif_2a)
 mgif_2b <- image_read(gif_2b)
