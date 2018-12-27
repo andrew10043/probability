@@ -10,7 +10,7 @@ universality_theme <- theme(
   plot.margin = margin(t = 0.75, r = 0.75, b = 0.5, l = 0.75, unit = "cm"),
   plot.title = element_text(size = 14, hjust = 0.5,
                             margin= margin(b = 0.5, unit = "cm")),
-  plot.subtitle = element_text(size = 12, hjust = 0.5,
+  plot.subtitle = element_text(size = 10, hjust = 0.5,
                                margin= margin(b = 0.5, unit = "cm")),
   plot.caption = element_text(size = 9, hjust = 1,
                               margin = margin(t = 0.6, unit = "cm")),
@@ -67,7 +67,8 @@ plot_1a <- ggplot() +
   geom_rug(data = dist_data, aes(x = samp_unif),
            color = org_col) + 
   transition_states(states = sample, transition_length = 1,
-                    state_length = 1) +
+                    state_length = 1.5) +
+  ease_aes("sine-in-out") + 
   annotate(geom = "text", label = "U(0,1) PDF", color = blue_col,
            size = 3, fontface = "bold", x = 0.15, y = 1.1,
            hjust = 1) + 
@@ -86,7 +87,7 @@ plot_1a <- ggplot() +
                      breaks = c(0, 0.25, 0.50, 0.75, 1.0)) + 
   ylab("Probability Density") + 
   xlab("x") + 
-  labs(title = "Universality of the Uniform - Step 1:",
+  labs(title = "Inverse Transform Sampling - Step 1:",
        subtitle = "Random Sample from U(0,1)",
        caption = "") + 
   theme_classic() + 
@@ -105,7 +106,8 @@ plot_1b <- ggplot() +
   geom_rug(data = dist_data, aes(x = samp_cdf),
            color = pur_col) +
   transition_states(states = sample, transition_length = 1,
-                    state_length = 1) +
+                    state_length = 1.5) +
+  ease_aes("sine-in-out") +
   annotate(geom = "text", label = "N(0,1) CDF", color = pur_col,
            size = 3, fontface = "bold", x = 0.6, y = 0.95,
            hjust = 1) + 
@@ -126,20 +128,21 @@ plot_1b <- ggplot() +
                color = green_col,
                arrow = arrow(type = "closed", angle = 30, 
                              length = unit(0.03, "inches"))) + 
-  xlab("x") + 
-  ylab("F(x) or Probability Density") + 
-  labs(title = "Universality of the Uniform - Step 2:",
-       subtitle = "Map U(0,1) to Inverse of N(0,1) CDF",
+  xlab(expression(paste('x ', italic('or '), F^-1, '(x)'))) + 
+  ylab(expression(paste('x ', italic('or '), F, 
+                        '(x) ', italic('or '), 'Probability Density'))) + 
+  labs(title = "Inverse Transform Sampling - Step 2:",
+       subtitle = "Map Y ~ U(0,1) to inverse of N(0,1) CDF to generate X ~ N(0,1)",
        caption = "Graphic by Ben Andrew | @BenYAndrew") + 
   theme_classic() + 
   universality_theme 
 
 # Convert to GIF and combine
 gif_1a <- animate(plot_1a, device = "png", width = 6, 
-                  height = 6, units = "in", res = 300)
+                  height = 6, units = "in", res = 200)
 
-gif_1b <- animate(gif_1b, device = "png", width = 6,
-                  height = 6, units = "in", res = 300)
+gif_1b <- animate(plot_1b, device = "png", width = 6,
+                  height = 6, units = "in", res = 200)
 
 mgif_1a <- image_read(gif_1a)
 mgif_1b <- image_read(gif_1b)
@@ -161,7 +164,8 @@ plot_2a <- ggplot() +
   geom_rug(data = dist_data, aes(x = samp_norm),
            color = green_col) + 
   transition_states(states = sample, transition_length = 1,
-                    state_length = 1) +
+                    state_length = 1.5) +
+  ease_aes("sine-in-out") +
   annotate(geom = "text", label = "N(0,1) PDF", color = red_col,
            size = 3, fontface = "bold", x = -3, y = 0.05,
            hjust = 1) + 
@@ -180,7 +184,7 @@ plot_2a <- ggplot() +
                      breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5)) + 
   ylab("Probability Density") + 
   xlab("x") + 
-  labs(title = "Universality of the Uniform - Step 1:",
+  labs(title = "Probability Integral Transform - Step 1:",
        subtitle = "Random Sample from N(0,1)",
        caption = "") + 
   theme_classic() + 
@@ -200,7 +204,8 @@ plot_2b <- ggplot() +
   geom_rug(data = dist_data, aes(x = samp_pdf),
            color = pur_col) +
   transition_states(states = sample, transition_length = 1,
-                    state_length = 1) +
+                    state_length = 1.5) +
+  ease_aes("sine-in-out") +
   annotate(geom = "text", label = "N(0,1) CDF", color = pur_col,
            size = 3, fontface = "bold", x = 0.15, y = -1.8,
            hjust = 0) + 
@@ -215,28 +220,29 @@ plot_2b <- ggplot() +
                color = green_col,
                arrow = arrow(type = "closed", angle = 30, 
                              length = unit(0.03, "inches"))) +
-  annotate(geom = "text", label = "X ~ U(0,1)", color = org_col,
+  annotate(geom = "text", label = "Y ~ U(0,1)", color = org_col,
            size = 3, fontface = "bold", x = 0.625, y = 1.8, hjust = 1) + 
   geom_segment(aes(x = 0.63, xend = 0.65, y = 1.65, yend = 1.4),
                color = org_col,
                arrow = arrow(type = "closed", angle = 30, 
                              length = unit(0.03, "inches"))) + 
-  xlab("x or F(x)") + 
-  ylab("x or Probability Density") + 
-  labs(title = "Universality of the Uniform - Step 2:",
-       subtitle = "Map N(0,1) to N(0,1) CDF",
+  xlab(expression(paste('x ', italic('or '), 'F(x)'))) + 
+  ylab(expression(paste('x ', italic('or '), F^-1, '(x) ', italic('or '),
+                        'Probability Density'))) + 
+  labs(title = "Probability Integral Transform - Step 2:",
+       subtitle = "Map X ~ N(0,1) to N(0,1) CDF to generate Y ~ U(0,1)",
        caption = "Graphic by Ben Andrew | @BenYAndrew") + 
   theme_classic() + 
   universality_theme 
 
 # Convert to GIF and combine
 gif_2a <- animate(plot_2a, device = "png", 
-                    width = 6, height = 6, 
-                    units = "in", res = 100)
+                  width = 6, height = 6, 
+                  units = "in", res = 200)
 
-gif_2b <- animate(plot_2b, device = "png", 
-                   width = 6, height = 6, 
-                   units = "in", res = 100)
+gif_2b <- animate(plot_2b, device = "png",
+                  width = 6, height = 6,
+                  units = "in", res = 200)
 
 mgif_2a <- image_read(gif_2a)
 mgif_2b <- image_read(gif_2b)
@@ -244,14 +250,13 @@ mgif_2b <- image_read(gif_2b)
 part_2 <- image_append(c(mgif_2a[1], mgif_2b[1]))
 
 for(i in 2:100){
-  combined <- image_append(c(norm_mgif[i], new_mgif[i]))
+  combined <- image_append(c(mgif_2a[i], mgif_2b[i]))
   part_2 <- c(part_2, combined)
 }
 
 # Save Files
 anim_save("figures/universality_1.gif", animation = part_1,
-          device = "png", width = 15, height = 6, units = "in", res = 300)
+          device = "png")
 
 anim_save("figures/universality_2.gif", animation = part_2,
-          device = "png", width = 15, height = 6, units = "in", res = 300)
-
+          device = "png")
