@@ -253,10 +253,3 @@ for(i in 2:100){
   combined <- image_append(c(mgif_2a[i], mgif_2b[i]))
   part_2 <- c(part_2, combined)
 }
-
-# Save Files
-anim_save("figures/universality_1.gif", animation = part_1,
-          device = "png")
-
-anim_save("figures/universality_2.gif", animation = part_2,
-          device = "png")
