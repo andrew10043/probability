@@ -74,7 +74,7 @@ generate_simulation <-
       max = 2
     )
     
-    # Created sample data frame for simulation
+    # Sample data frame for a given simulation
     df <- data.frame(
       x1 = c(mp_t_x1, mp_c_x1, cr_x1, obs_x1),
       x2 = c(mp_t_x2, mp_c_x2, cr_x2, obs_x2),
