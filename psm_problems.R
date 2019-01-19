@@ -139,7 +139,11 @@ prune_order <-
       ps_min <- numeric(length = 150)
 
       for (j in 1:150) {
-
+        
+        # Iterate over each column of the distance matrix.
+        # Look for minimum distance for each column.
+        # Restrict to observations with opposite treat/control value.
+        
         if (j %in% c(1:25, 51:75)) {
 
           mh_min[j] <-
@@ -159,16 +163,21 @@ prune_order <-
         }
 
       }
-    
+      
+      # Order the minimum distances
       mh_order <- order(mh_min, decreasing = TRUE)
       ps_order <- order(ps_min, decreasing = TRUE)
       
+      # Identify the highest minimum distance for pruning
       mh_out <- mh_order[1]
       ps_out <- ps_order[1]
-
+      
+      # Set this distance in the distance matrix to effectively '0'
+      # This step ensures that the next iteration will not id the same point
       mh_dist[, mh_out] <- 1e-10
       ps_dist[, ps_out] <- 1e-10
       
+      # Iteratively generate list of pruned points
       mh_list <- c(mh_list, mh_out)
       ps_list <- c(ps_list, ps_out)
       
