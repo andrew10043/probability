@@ -128,8 +128,15 @@ plt_3 <-
 
 grid_1 <- plot_grid(dag_1, plt_1, plt_2, plt_3, ncol = 2, align = "hv")
 
-ggsave("figures/post_treatment_bias.jpeg", grid_1,
-       height = 7, width = 10, device = "jpeg")
+title <- ggdraw() + 
+  draw_label("Example #1: 'The Clogged Pipe'",
+             fontface = 'bold',
+             fontfamily = "Gill Sans MT")
+
+grid_1b <- plot_grid(title, grid_1, ncol = 1, rel_heights = c(0.1, 1))
+
+ggsave("figures/post_treatment_bias.jpeg", grid_1b,
+       height = 6, width = 7, device = "jpeg")
 
 ## Example 2: conditioning on a collider
 dag_2 <- 
@@ -254,8 +261,15 @@ plt_6 <-
 
 grid_2 <- plot_grid(dag_2, plt_4, plt_5, plt_6, ncol = 2, align = "hv")
 
-ggsave("figures/collider_bias.jpeg", grid_2,
-       height = 7, width = 10, device = "jpeg")
+title <- ggdraw() + 
+  draw_label("Example #2: 'The Hidden Collider'",
+             fontface = 'bold',
+             fontfamily = "Gill Sans MT")
+
+grid_2b <- plot_grid(title, grid_2, ncol = 1, rel_heights = c(0.1, 1))
+
+ggsave("figures/collider_bias.jpeg", grid_2b,
+       height = 6, width = 7, device = "jpeg")
 
 ## Example 3: conditioning on the descendant of a fork
 dag_3 <- 
@@ -382,6 +396,13 @@ plt_9 <-
 
 grid_3 <- plot_grid(dag_3, plt_7, plt_8, plt_9, ncol = 2, align = "hv")
 
-ggsave("figures/descendant_adjustment.jpeg", grid_3,
-       height = 7, width = 10, device = "jpeg")
+title <- ggdraw() + 
+  draw_label("Example #3: 'The Fork's Descendant'",
+             fontface = 'bold',
+             fontfamily = "Gill Sans MT")
+
+grid_3b <- plot_grid(title, grid_3, ncol = 1, rel_heights = c(0.1, 1))
+
+ggsave("figures/descendant_adjustment.jpeg", grid_3b,
+       height = 6, width = 7, device = "jpeg")
 
