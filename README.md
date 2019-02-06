@@ -1,5 +1,5 @@
 # probability
-Visual representations of probability problems.
+*Visualization and simulation of various statistics and probability concepts.*
 
 1. **DAG Simulations** 
 - Simple simulations of several classic DAGs, with visualizations of different modeling choices.
