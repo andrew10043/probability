@@ -225,5 +225,4 @@ title <- ggdraw() +
 grid_b <- plot_grid(title, grid, ncol = 1, rel_heights = c(0.1, 1))
 
 ggsave("figures/entropy_kld.jpeg", grid_b, device = "jpeg",
-       width = 8, height = 9, dpi = 300)
-
+       width = 8, height = 9, dpi = 400)
