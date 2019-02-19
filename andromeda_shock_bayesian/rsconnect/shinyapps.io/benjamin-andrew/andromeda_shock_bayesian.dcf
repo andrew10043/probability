@@ -1,0 +1,12 @@
+name: andromeda_shock_bayesian
+title: andromeda_shock_bayesian
+username:
+account: benjamin-andrew
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 725158
+bundleId: 1883609
+url: https://benjamin-andrew.shinyapps.io/andromeda_shock_bayesian/
+when: 1550551093.96534
+asMultiple: FALSE
+asStatic: FALSE
