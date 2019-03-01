@@ -9,8 +9,8 @@ int_sim <- function(beta_trt = -0.4, beta_x = 0, ratio = 1) {
   
   p_function <- function(trt, x) {
     
-    exp((beta_trt * trt) + (beta_trt * trt) + (beta_int * trt * x)) / 
-      (1 + exp((beta_trt * trt) + (beta_trt * trt) + (beta_int * trt * x)))
+    exp((beta_trt * trt) + (beta_x * x) + (beta_int * trt * x)) / 
+      (1 + exp((beta_trt * trt) + (beta_x * x) + (beta_int * trt * x)))
     
   }
   
