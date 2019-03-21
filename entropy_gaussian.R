@@ -55,7 +55,7 @@ plt_1 <-
     axis.text.x = element_text(size = 10),
     axis.text.y = element_blank(),
     axis.ticks.y = element_blank(),
-    legend.position = c(0.9, 0.75)
+    legend.position = c(0.9, 0.4)
   )
 
 plt_2 <-
