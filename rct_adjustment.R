@@ -369,7 +369,7 @@ dist_data_c <- null_cov_c %>%
 
 null_p_dist_c <-
   ggplot(
-    data = dist_data_n,
+    data = dist_data_c,
     aes(x = n_p)
   ) + 
   geom_histogram(binwidth = 1,
@@ -871,7 +871,7 @@ est_dens_300 <-
                   ylim = c(0.95, 2)) + 
   scale_x_continuous(breaks = c(-0.2, 0, 0.2, 0.4, 0.6)) + 
   labs(
-    x = expression(paste(hat(beta)[treat], " [median, 89% cred. interval]")),
+    x = expression(paste(hat(beta)[treat], " [median, 89% credible interval]")),
     y = "Density"
   ) + 
   facet_grid(key ~ .) + 
@@ -885,7 +885,7 @@ est_dens_300 <-
     axis.ticks.y = element_blank(),
     axis.title.y = element_text(margin = margin(0, 0, 0, 0, "cm")),
     plot.margin = margin(0, 0, 0, 0, "cm"),
-    axis.title.x = element_text(size = 10.5)
+    axis.title.x = element_text(size = 9.5)
 )
 
 se_dens_300 <-
@@ -906,7 +906,7 @@ se_dens_300 <-
                   ylim = c(0.95, 2)) + 
   scale_x_continuous(breaks = c(0.05, 0.08, 0.11, 0.14)) + 
   labs(
-    x = expression(paste(paste("SE of ", hat(beta)[treat]), " [median, 89% cred. interval]")),
+    x = expression(paste(paste("SE of ", hat(beta)[treat]), " [median, 89% credible interval]")),
     y = "Density"
   ) + 
   facet_grid(key ~ .) + 
@@ -920,7 +920,7 @@ se_dens_300 <-
     axis.ticks.y = element_blank(),
     axis.title.y = element_text(margin = margin(0, 0, 0, 0, "cm")),
     plot.margin = margin(0, 0, 0, 0, "cm"),
-    axis.title.x = element_text(size = 10.5)
+    axis.title.x = element_text(size = 9.5)
   )
 
 p_dens_300 <-
@@ -960,8 +960,9 @@ p_dens_300 <-
   ) + 
   scale_y_continuous(limits = c(0, 1), expand = c(0, 0),
                      breaks = c(0, 0.2, 0.4, 0.6, 0.8)) +
+  scale_x_continuous(breaks = c(0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3)) +
   coord_cartesian(xlim = c(-0.005, 0.3),
-                  ylim = c(0, 0.95)) + 
+                  ylim = c(0, 0.95)) +
   facet_grid(key ~ ., labeller = facet_labels) + 
   theme_classic() + 
   theme(
@@ -972,7 +973,7 @@ p_dens_300 <-
     strip.text = element_text(face = "bold",
                               size = 9),
     plot.margin = margin(0, 0, 0, 0, "cm"),
-    axis.title.x = element_text(size = 10.5)
+    axis.title.x = element_text(size = 9.5)
   )
 
 dens_grid_300 <- plot_grid(est_dens_300, NULL, se_dens_300, NULL, p_dens_300,
@@ -1044,7 +1045,7 @@ est_dens_500 <-
     axis.ticks.y = element_blank(),
     axis.title.y = element_text(margin = margin(0, 0, 0, 0, "cm")),
     plot.margin = margin(0, 0, 0, 0, "cm"),
-    axis.title.x = element_text(size = 10.5)
+    axis.title.x = element_text(size = 9.5)
   )
 
 se_dens_500 <-
@@ -1065,7 +1066,7 @@ se_dens_500 <-
                   ylim = c(0.95, 2)) + 
   scale_x_continuous(breaks = c(0.05, 0.08, 0.11, 0.14)) + 
   labs(
-    x = expression(paste(paste("SE of ", hat(beta)[treat]), " [median, 89% cred. interval]")),
+    x = expression(paste(paste("SE of ", hat(beta)[treat]), " [median, 89% credible interval]")),
     y = "Density"
   ) + 
   facet_grid(key ~ .) + 
@@ -1079,7 +1080,7 @@ se_dens_500 <-
     axis.ticks.y = element_blank(),
     axis.title.y = element_text(margin = margin(0, 0, 0, 0, "cm")),
     plot.margin = margin(0, 0, 0, 0, "cm"),
-    axis.title.x = element_text(size = 10.5)
+    axis.title.x = element_text(size = 9.5)
   )
 
 p_dens_500 <-
@@ -1119,9 +1120,9 @@ p_dens_500 <-
   ) + 
   scale_y_continuous(limits = c(0, 1), expand = c(0, 0),
                      breaks = c(0, 0.2, 0.4, 0.6, 0.8)) +
-  scale_x_continuous(breaks = c(0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3)) + 
+  scale_x_continuous(breaks = c(0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3)) +
   coord_cartesian(xlim = c(-0.005, 0.3),
-                  ylim = c(0, 0.95)) + 
+                  ylim = c(0, 0.95)) +
   facet_grid(key ~ ., labeller = facet_labels) + 
   theme_classic() + 
   theme(
@@ -1132,7 +1133,7 @@ p_dens_500 <-
     strip.text = element_text(face = "bold",
                               size = 9),
     plot.margin = margin(0, 0, 0, 0, "cm"),
-    axis.title.x = element_text(size = 10.5)
+    axis.title.x = element_text(size = 9.5)
   )
 
 dens_grid_500 <- plot_grid(est_dens_500, NULL, se_dens_500, NULL, p_dens_500,
@@ -1203,7 +1204,8 @@ sample_sim_plot <-
 
 pd <- position_dodge(50) 
 
-samp_include <- seq(100, 850, by = 50)
+samp_include <- c(100, 150, 200, 250, 300, 350, 400, 
+                  450, 500, 550, 600, 650, 700)
 
 sample_plt <-
   ggplot(data = sample_sim_plot %>%
