@@ -752,6 +752,19 @@ model_choice <- function(s, sample_size) {
   pi_se <- summary(pi_res)$coefficients["group", "Std. Error"]
   pi_est <- summary(pi_res)$coefficients["group", "Estimate"] 
   
+  # R2 for all predictors base model
+  base_all <- lm(Y_assign ~ C1 + C2 + C3 + C4 + C5 + C6 + C7 + C8 + C9 + C10, 
+                 data = random_sample)
+  base_all_r2 <- summary(base_all)$r.squared
+  base_all_adj_r2 <- summary(base_all)$adj.r.squared
+  
+  # R2 for top three predictors base model
+  base_top <- lm(Y_assign ~ C1 + C2 + C3, 
+                 data = random_sample)
+  base_top_r2 <- summary(base_top)$r.squared
+  base_top_adj_r2 <- summary(base_top)$adj.r.squared
+  
+  
   data.frame(
     sample = s,
     sample_size = sample_size,
@@ -772,17 +785,19 @@ model_choice <- function(s, sample_size) {
     pi_p = pi_p,
     top_est = top_est,
     top_se = top_se,
-    top_p = top_p
+    top_p = top_p,
+    base_all_r2 = base_all_r2,
+    base_all_adj_r2 = base_all_adj_r2,
+    base_top_r2 = base_top_r2,
+    base_top_adj_r2 = base_top_adj_r2
     )
   
 }
 
 #### Treatment Simulation ------------------------------------------------------
 treat_sim <- function(total_samples, sample_size, condense = "n") {
-
-  n_cores <- detectCores()
-  clust <- makeCluster(n_cores)
-  doParallel::registerDoParallel(clust, cores = 4)
+  
+  print(sample_size)
   
   out <- 
     foreach(s = 1:total_samples, .packages = c("tidyverse"),
@@ -806,8 +821,6 @@ treat_sim <- function(total_samples, sample_size, condense = "n") {
               model_choice(s, sample_size)
               
             }
-  
-  stopCluster(clust)
   
   if (condense == "y") {
     
@@ -835,10 +848,16 @@ arg_list <-
   list(total_samples = total_samples,
        sample_size = c(300, 500))
 
+n_cores <- detectCores()
+clust <- makeCluster(n_cores)
+doParallel::registerDoParallel(clust, cores = 4)
+
 treat_sim_result <-
   pmap_df(arg_list,
           ~ treat_sim(total_samples = ..1,
                       sample_size = ..2))
+
+stopCluster(clust)
 
 treat_sim_result <-
   as_tibble(treat_sim_result)
@@ -1178,12 +1197,17 @@ arg_list <-
                        450, 500, 550, 600, 650, 700),
        condense = "y")
 
+n_cores <- detectCores()
+clust <- makeCluster(n_cores)
+doParallel::registerDoParallel(clust, cores = 4)
 
 sample_sim_result <-
   pmap_df(arg_list,
           ~ treat_sim(total_samples = ..1,
                       sample_size = ..2,
                       condense = ..3))
+
+stopCluster(clust)
 
 sample_sim <-
   as_tibble(treat_sim)
@@ -1261,4 +1285,159 @@ sample_grid_b <- plot_grid(sample_grid, sample_caption, ncol = 1,
 ggsave("figures/rct_adjust_8.jpeg", sample_grid_b,
        height = 6, width = 10, device = "jpeg")
   
-             
+#### Power Ratio Simulation
+total_samples <- 500
+
+arg_list <-
+  list(total_samples = total_samples,
+       sample_size = seq(100, 700, by = 10),
+       condense = "n")
+
+n_cores <- detectCores()
+clust <- makeCluster(n_cores)
+doParallel::registerDoParallel(clust, cores = 4)
+
+ratio_data <-
+  pmap_df(arg_list,
+          ~ treat_sim(total_samples = ..1,
+                      sample_size = ..2,
+                      condense = ..3))
+
+stopCluster(clust)
+
+ratio_data_plt <-
+  as_tibble(ratio_data) %>%
+  select(sample, sample_size, c_p, no_p, base_all_r2) %>%
+  mutate(
+    base_all_r2_diff = 1 - base_all_r2
+  ) %>%
+  group_by(sample_size) %>%
+  summarise(pwr_no = mean(no_p < 0.05),
+            pwr_c = mean(c_p < 0.05),
+            base_all_r2_diff = mean(base_all_r2_diff),
+            base_all_r2 = mean(base_all_r2)) %>%
+  ungroup() %>%
+  mutate(
+    sample_size_2 = sample_size * base_all_r2_diff
+  )
+    
+adj_col <- "#00D600"
+unadj_col <- "#FF7400"
+mod_col <- "#D60079"
+ann_val <- "$n_{adjusted} =  n_{unadjusted} \\times (1 - R^{2})$"
+ann_val_2 <- "$with\\,\ R^{2}\\,\ from\\,\ a\\,\ predictor-only\\,\ model$"
+
+ratio_plt <-
+  ggplot(
+    data = ratio_data_plt
+  ) + 
+  stat_smooth(aes(x = sample_size, y = pwr_c),
+              color = "grey80",
+              alpha = 0.5, size = 5,
+              geom = "line",
+              method = "loess") +
+  geom_segment(aes(x = sample_size, xend = sample_size_2,
+                   y = pwr_no, yend = pwr_no),
+               color = "black", size = 0.5,
+               linetype = "dashed") + 
+  geom_point(aes(x = sample_size, y = pwr_c),
+             color = adj_col,
+             size = 3) + 
+  geom_point(aes(x = sample_size, y = pwr_no),
+             color = unadj_col,
+             size = 3) + 
+  geom_point(aes(x = sample_size_2, y = pwr_no),
+             color = mod_col,
+             size = 3) + 
+  annotate(geom = "text",
+           label = "Unadjusted Model",
+           color = unadj_col,
+           x = 250, y = 0.4,
+           hjust = 0,
+           family = "Gill Sans MT",
+           fontface = "bold") + 
+  geom_segment(x = 245, xend = 210, y = 0.40, yend = 0.415, 
+               arrow = arrow(type = "closed", angle = 30, 
+                             length = unit(0.05, "inches")),
+               col = unadj_col) + 
+  annotate(geom = "text",
+           label = "Adjusted Model",
+           color = adj_col,
+           x = 250, y = 0.875,
+           hjust = 1,
+           family = "Gill Sans MT",
+           fontface = "bold") + 
+  geom_segment(x = 255, xend = 290, y = 0.873, yend = 0.858, 
+               arrow = arrow(type = "closed", angle = 30, 
+                             length = unit(0.05, "inches")),
+               col = adj_col) + 
+  annotate(geom = "text",
+           label = "Extrapolated\nAdjusted Model",
+           color = mod_col,
+           x = 185, y = 0.8,
+           hjust = 1,
+           family = "Gill Sans MT",
+           fontface = "bold") + 
+  geom_segment(x = 190, xend = 220, y = 0.778, yend = 0.755, 
+               arrow = arrow(type = "closed", angle = 30, 
+                             length = unit(0.05, "inches")),
+               col = mod_col) + 
+  annotate(geom = "text",
+           label = "Adjusted Model\nSmoothed Trend",
+           color = "grey50",
+           x = 375, y = 1,
+           hjust = 1,
+           family = "Gill Sans MT",
+           fontface = "bold") + 
+  geom_segment(x = 380, xend = 410, y = 0.98, yend = 0.96, 
+               arrow = arrow(type = "closed", angle = 30, 
+                             length = unit(0.05, "inches")),
+               col = "grey50") + 
+  geom_rect(xmin = 435, xmax = 700, ymin = 0.52, ymax = 0.62,
+            linetype = 1, color = "white", fill = "grey") + 
+  annotate(geom = "text", label = "For Models with Equal Power:",
+           x = 450, y = 0.6,
+           hjust = 0, family = "Gill Sans MT",
+           fontface = "bold.italic",
+           size = 3.5) + 
+  annotate(geom = "text", label = TeX(ann_val, output = "character"),
+           parse = TRUE, 
+           x = 450, y = 0.57, fontface = "bold",
+           family = "Gill Sans MT", hjust = 0,
+           size = 3.5) + 
+  annotate(geom = "text", label = TeX(ann_val_2, output = "character"),
+           parse = TRUE,
+           x = 450, y = 0.54,
+           hjust = 0, family = "Gill Sans MT",
+           fontface = "bold",
+           size = 3.5) + 
+  labs(
+    x = "Sample Size",
+    y = expression(paste(paste(paste("Power", " ("), alpha), " = 0.05)"))
+  ) + 
+  theme_classic() + 
+  theme(
+    text = element_text(family = "Gill Sans MT"),
+    axis.title = element_text(size = 13),
+    axis.text = element_text(size = 10)
+  )
+
+ratio_title <- ggdraw() + 
+  draw_label("Approximation of the Sample Size Needed to Obtain \nEqual Power in an Adjusted vs. Unadjusted Model",
+             fontface = 'bold', fontfamily = "Gill Sans MT", size = 15)
+
+ratio_caption <- ggdraw() + 
+  draw_label("Graphic by Ben Andrew | @BenYAndrew",
+             fontfamily = "Gill Sans MT", size = 8, hjust = -0.75)
+
+ratio_grid <- plot_grid(ratio_title, ratio_plt, ncol = 1, 
+                         rel_heights = c(0.1, 1)) + 
+  theme(plot.margin = margin(0, 0, 0, 0, "cm"))
+
+ratio_grid_b <- plot_grid(ratio_grid, ratio_caption, ncol = 1, 
+                           rel_heights = c(1, 0.05)) + 
+  theme(plot.margin = margin(0.2, 0.2, 0.2, 0.2, "cm"))
+
+ggsave("figures/rct_adjust_9.jpeg", ratio_grid_b,
+       height = 7, width = 7, device = "jpeg")
+
