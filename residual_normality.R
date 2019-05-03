@@ -264,7 +264,7 @@ df <-
     a = c(rnorm(1000, 0, 1),
           rnorm(1000, 0, 1),
           rnorm(1000, 2, 1),
-          rnorm(1000, 0.8, 1)),
+          rnorm(1000, 0.75, 1)),
     x = rep(c(0, 1), each = 2000),
     cat = rep(c("big", "small", "big", "small"), each = 1000)
   )
