@@ -1,0 +1,1196 @@
+---
+title: "Bayesian Modeling of RCTs to Estimate Patient-Specific Efficacy"
+author: "Benjamin Andrew"
+date: "5/15/2019"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    theme: cosmo
+    highlight: zenburn
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      cache = TRUE)
+```
+
+```{r libraries and data, include = FALSE, cache = FALSE}
+library(Hmisc)
+library(tidyverse)
+library(brms)
+library(tidybayes)
+library(cowplot)
+library(kamila)
+library(tidybayes)
+library(bayesplot)
+library(extrafont)
+
+# Load models
+load("~/Desktop/academic/research/other/probability/bayesian_rct_example_data.Rdata")
+
+# Load Data
+load(url('http://hbiostat.org/data/gusto.rda'))
+gusto <- 
+  upData(gusto, keep=Cs(day30, tx, age, Killip, sysbp, pulse, pmi, miloc)) %>%
+  as_tibble() %>%
+  mutate(
+    age_s = (age - mean(age)) / (sd(age)),
+    sbp_s = (sysbp - mean(sysbp)) / (sd(sysbp)),
+    pulse_s = (pulse - mean(pulse)) / (sd(pulse)),
+    id = seq(1:nrow(gusto)),
+    id = factor(id),
+    age_c = cut(age_s, breaks = c(-Inf, 0, Inf), labels = c("low", "high")),
+    pulse_c = cut(pulse_s, breaks = c(-Inf, 0, Inf), labels = c("low", "high")),
+    sbp_c = cut(sbp_s, breaks = c(-Inf, 0, Inf), labels = c("low", "high")),
+    killip_c = case_when(Killip %in% c("I", "II") ~ "low",
+                         Killip %in% c("III", "IV") ~ "high")
+  ) %>%
+  mutate(
+    group_id = group_indices(., age_c, killip_c, pmi),
+    group_id = factor(group_id)
+  )
+  
+```
+# Background  
+  
+This is a Bayesian adaptation and extension of Frank Harrell's post titled: *["Assessing Heterogeneity of Treatment Effect, Estimating Patient-Specific Efficacy, and Studying Variation in Odds Ratios, Risk Ratios, and Risk Differences"](https://www.fharrell.com/post/varyor/)*. The goal of this project is to provide a Bayesian framework with which we can: (1) explore the presence/absence of heterogeneity of treatment effect (HTE) and (2) model patient-specific treatment efficacy on multiple scales (i.e., ARR, RR, OR). While some consider HTE to be present if risk varies on the either the relative or absolute scale, others consider these to be separate phenomena (i.e., *true HTE* on the relative scale vs. *risk magnification* on the absolute scale). Regardless of terminology, a framework to model and adequately present these variations in risk is, in my opinion, essential when interpreting and applying the results of randomized controlled trials. There are several excellent reviews of this topic that cover the nuances in both its terminology and application in detail ([**1**](https://www.bmj.com/content/363/bmj.k4245/article-info), [**2**](https://www.fharrell.com/post/hteview/)).  
+  
+For this project, we will use data from the [GUSTO-I trial](https://www.nejm.org/doi/pdf/10.1056/NEJM199309023291001) by Eric Topol and colleagues. This trial (published in 1993, prior to PCI becoming standard of care for acute STEMI) enrolled patients with myocardial infarction and examined relative efficacy of four different thrombolytic regimens: (1) streptokinase (SK) + subcutaneous heparin; (2) SK + intravenous heparin; (3) tPA + intravenous heparin; and (4) tPA + SK + intravenous heparin. For the purposes of this project, we will be condensing the two groups receiving SK, and will primarily be examining the relative difference between SK-only regimens (n = 20,162) and tPA-only (n = 10,348) regimens (we will not be specifically examining the combined SK + tPA group). We will still use patients in the SK + tPA group to build our models, though, as their data can help inform the relationship between the additional baseline variables and risk. The major outcome in this trial was 30-day mortality, and several baseline variables were collected.
+  
+For this project we will walk through the modeling process step-by-step using the *brms* package, with visualizations using *tidybayes*, *bayesplot* and, of course, *ggplot2*. We will do some prior-predictive simulation to pick reasonable priors, and will perform some basic model diagnostics.    
+  
+As a final note, I am in no way an expert on trials or Bayesian modeling. This serves as a learning exercise for me, and I hope it is helpful for others who are equally interested in these concepts. With that said, I greatly appreciate any and all feedback that may improve on this work. Feel free to reach out at *benjamin.andrew@duke.edu* with any comments. The code for this project is freely available at *www.github.com .... *.  
+  
+# Data Preparation and Exploration  
+  
+The dataset used here is complete, and contains the following variables:  
+  
+- day30: mortality status at 30 days (1 / 0)
+- pulse: Heart rate (BPM) at study entry  
+- age: Age (years)  
+- sysbp: Systolic blood pressure (mm Hg) at study entry  
+- Killip: Killip class (1, 2, 3, or 4)  
+- miloc: Infarct location (anterior, inferior, or other)  
+- pmi: History of previous myocardial infarction (yes / no)  
+- tx: Treatment (tPA, SK, or both)  
+  
+A quick glance at the data tells us what we're working with:  
+  
+<hr>
+```{r data summary}
+gusto %>% 
+  select(day30, pulse, age, sysbp, Killip, miloc, pmi, tx) %>% 
+  Hmisc::describe() %>%
+  Hmisc::html(scroll = TRUE, rows = 50)
+```  
+<hr>
+  
+Some of these values seem to fall outside the plausible range (e.g., pulse or SBP of zero), but we'll ignore these for the sake of simplicity.  
+  
+Next we can plot the distributions of each variable, stratified by outcome. For the continuous variables we'll also show the centered/scaled version as this is what we'll use for modeling.  
+<br>
+```{r variable plots, fig.align = "center", fig.height = 4, fig.width = 9}
+base_theme <-
+  theme_classic() +
+  theme(text = element_text(family = "Gill Sans MT"))
+
+facet_labels <- as_labeller(
+  c(age = "Age (years)", 
+    pulse = "HR (BPM)",
+    sysbp = "SBP (mm Hg)",
+    age_s = "Age (centered/scaled)",
+    pulse_s = "HR (centered/scaled)",
+    sbp_s = "SBP (centered/scaled)"))
+
+plt_1 <- 
+  ggplot(
+    data = gusto %>% 
+      select(day30, age, age_s, sysbp, sbp_s, pulse, pulse_s) %>%
+      gather(key = "key", value = "value", -day30) %>%
+      mutate(key = factor(key, levels = c("age", "pulse", "sysbp",
+                                          "age_s", "pulse_s", "sbp_s")))
+  ) + 
+  geom_density(
+    aes(x = value,
+        fill = factor(day30)),
+    adjust = 1.75,
+    alpha = 0.5
+  ) + 
+  labs(
+    x = "Value",
+    y = "Density",
+    subtitle = "Continuous Variables Stratified by Outcome"
+  ) + 
+  scale_fill_brewer(type = "qual", palette = "Dark2",
+                    name = "Status at Day 30:",
+                    breaks = c(0, 1),
+                    labels = c("Alive", "Dead")) + 
+  facet_wrap(~ key, scales = "free", labeller = facet_labels) + 
+  base_theme + 
+  theme(
+    strip.background = element_rect(fill = "grey80", color = "white"),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom",
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+ 
+facet_labels <- as_labeller(
+  c(tx = "Treatment", 
+    Killip = "Killip Class",
+    miloc = "Infarct Location",
+    pmi = "History of MI"))
+
+plt_2 <- 
+  ggplot(
+      data = gusto %>%
+        select(day30, Killip, miloc, pmi, tx) %>%
+        gather(key = "key", value = "value", -day30) %>%
+        mutate(key = factor(key, levels = c("tx", "Killip", "miloc", "pmi")))
+    ) +
+    geom_bar(
+      aes(x = value,
+          fill = factor(day30)),
+      position = "fill"
+    ) + 
+    scale_fill_brewer(type = "qual", palette = "Dark2",
+                    name = "Status at Day 30:",
+                    breaks = c(0, 1),
+                    labels = c("Alive", "Dead")) + 
+    facet_wrap(~ key, scales = "free", labeller = facet_labels) + 
+    labs(
+      x = "Value",
+      y = "Proportion",
+      subtitle = "Categorical Variables Stratified by Outcome"
+    ) +
+    base_theme + 
+    theme(
+      strip.background = element_rect(fill = "grey80", color = "white"),
+      strip.text = element_text(face = "bold"),
+      legend.position = "bottom",
+      axis.text.y = element_blank(),
+      axis.ticks.y = element_blank()
+      )
+
+plot_grid(plt_1, plt_2, ncol = 2, align = "hv")
+```  
+  
+# Model Building
+  
+We'll build up our model sequentially, examining the change in predicted out of sample fit as we go. For this task we'll use WAIC.
+  
+## Base Model  
+  
+We'll start with a base model containing just the treatment. When defining this model, well use the following parameterization:  
+<br>
+<center> $day30_i \sim Bernoulli(p_i)$</center>  
+<br>
+<center> $p_i \sim intercept + \beta_{tPA}(tPA_i) + \beta_{SK}(SK_i)$</center>
+<br>
+Where $tPA_i$ is the tPA status (0/1) of each patient, and $SK_i$ is the SK status (0/1) of each patient. Thus, the intercept here represents the log-odds of 30-day mortality in patients receiving SK + tPA. We can use this information to start thinking about reasonable priors. In a similar [study](https://www.ncbi.nlm.nih.gov/pubmed/1975322) published in the Lancet a few years prior to the GUSTO-I trial, patients with suspected acute myocardial infarction received either tPA or SK. In-hospital mortality in this study was 8.9% and 8.5% in the two treatment groups, respectively. We can use this data to inform our prior for the intercept in this base model. Let's imagine we use a broad (on the probability scale), rather uninformative prior such as $intercept \sim Normal(0, 1.5)$. Below I've plotted the result of 10,000 random draws from this prior on the log odds scaled (left) and probability scale (right).  
+  
+```{r, fig.align = "center", fig.width = 6, fig.height = 2}
+set.seed(11)
+intercept <- rnorm(10000, 0, 1.5)
+
+df <- tibble(lo = intercept,
+             pr = inv_logit_scaled(intercept))
+
+lo_plt <- 
+  ggplot(data = df, aes(x = lo)) + 
+  geom_density(fill = "darkblue") + 
+  labs(
+    x = "Log Odds(day30 = 1)",
+    y = "Density",
+    subtitle = "Prior Distribution (Intercept)"
+  ) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+  
+pr_plt <- 
+  ggplot(data = df, aes(x = pr)) + 
+  geom_density(fill = "darkgreen") + 
+  labs(
+    x = "Pr(day30 = 1)",
+    y = "Density",
+    subtitle = "Prior Distribution (Intercept)"
+  ) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+    
+plot_grid(lo_plt, pr_plt, ncol = 2, align = "hv")  
+```  
+  
+This is a very broad and unnecessarily uninformative prior. Let's instead use the data from a prior study to develop a moderately informative prior. With an expected in-hospital mortality less than 10% we should aim for a prior that places most of its weight in the low probability zone, while still allowing for larger than expected effects to shine through (if present in the data). For this purpose I settled on $intercept \sim Normal(-2.5, 0.75)$. Here are the resultant prior distributions:  
+  
+```{r, fig.align = "center", fig.width = 6, fig.height = 2}
+set.seed(11)
+intercept <- rnorm(10000, -2.5, 0.75)
+
+df <- tibble(lo = intercept,
+             pr = inv_logit_scaled(intercept))
+
+lo_plt <- 
+  ggplot(data = df, aes(x = lo)) + 
+  geom_density(fill = "darkblue") + 
+  labs(
+    x = "Log Odds(day30 = 1)",
+    y = "Density",
+    subtitle = "Prior Distribution (Intercept)"
+  ) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+  
+pr_plt <- 
+  ggplot(data = df, aes(x = pr)) + 
+  geom_density(fill = "darkgreen") + 
+  labs(
+    x = "Pr(day30 = 1)",
+    y = "Density",
+    subtitle = "Prior Distribution (Intercept)"
+  ) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+    
+plot_grid(lo_plt, pr_plt, ncol = 2, align = "hv")  
+``` 
+  
+This looks more appropriate. The bulk of the density is below a 20% probability of 30-day mortality in the combined SK + tPA group, but the extended tail does allow for more extreme cases. The mean probability for 30-day mortality in the SK + tPA for this distribution is `r round(mean(df$pr), 3)`.  
+  
+Now let's turn our attention to the prior to $\beta_{SK}$ and $\beta_{tPA}$. I like Richard McElreath's approach to prior simulation for these coefficients. We can again start with a relatively broad and uninformative prior: $\beta \sim Normal(0, 3)$. Below I've plotted results from another 10,000 simulations from this distribution. This time we'll look at the *difference* in probability between groups that is implied by the prior (top row below). For these plots, we'll use our intercept distribution, and then generate a distribution of probabilities for 30-day mortality for each of the three groups based on our $\beta$ prior. We can then plot the absolute value of differences in these probabilities to get an idea of how big an effect our prior is assuming the treatment will have. We'll also plot the prior distributions for the probability of 30-day mortality by group (bottom row).  
+  
+```{r, fig.align = "center", fig.height = 6, fig.width = 10}
+set.seed(11)
+intercept <- rnorm(10000, -2.5, 0.75)
+beta_1 <- rnorm(10000, 0, 3)
+
+set.seed(12)
+beta_2 <- rnorm(10000, 0, 3)
+
+df <- 
+  tibble(both = inv_logit_scaled(intercept),
+         tpa = inv_logit_scaled(intercept + beta_1),
+         sk = inv_logit_scaled(intercept + beta_2)) %>%
+  mutate(diff_1 = abs(both - tpa), diff_2 = abs(both - sk),
+         diff_3 = abs(tpa - sk))
+
+plt_1 <- 
+  ggplot(data = df, aes(x = diff_1)) + 
+  geom_density(fill = "darkblue") + 
+  labs(
+    x = "abs[Pr(day30 = 1 | tx = SK + tPA) - Pr(day30 = 1 | tx = tPA)]",
+    y = "Density",
+    subtitle = "Prior: Treatment Contrast (SK + tPA vs. tPA)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plt_2 <- 
+  ggplot(data = df, aes(x = diff_2)) + 
+  geom_density(fill = "darkgreen") + 
+  labs(
+    x = "abs[Pr(day30 = 1 | tx = SK + tPA) - Pr(day30 = 1 | tx = SK)]",
+    y = "Density",
+    subtitle = "Prior: Treatment Contrast (SK + tPA vs. SK)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plt_3 <- 
+  ggplot(data = df, aes(x = diff_3)) + 
+  geom_density(fill = "darkred") + 
+  labs(
+    x = "abs[Pr(day30 = 1 | tx = tPA) - Pr(day30 = 1 | tx = SK)]",
+    y = "Density",
+    subtitle = "Prior: Treatment Contrast (tPA vs. SK)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plt_4 <- 
+  ggplot(data = df, aes(x = tpa)) + 
+  geom_density(fill = "purple") + 
+  labs(
+    x = "Pr(day30 = 1 | tx = tPA)",
+    y = "Density",
+    subtitle = "Prior: Specific Treatment (tPA)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plt_5 <- 
+  ggplot(data = df, aes(x = sk)) + 
+  geom_density(fill = "orange") + 
+  labs(
+    x = "Pr(day30 = 1 | tx = SK)",
+    y = "Density",
+    subtitle = "Prior: Specific Treatment (SK)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plt_6 <- 
+  ggplot(data = df, aes(x = both)) + 
+  geom_density(fill = "grey") + 
+  labs(
+    x = "Pr(day30 = 1 | tx = SK + tPA)",
+    y = "Density",
+    subtitle = "Prior: Specific Treatment (SK + tPA)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plot_grid(plt_1, plt_2, plt_3, plt_4, plt_5, plt_6, ncol = 3, align = "hv")
+```  
+  
+A few things to note about these results. While the bulk of the density for the differences in probability between treatments lies below 25%, there is a large portion of the distribution extends to extremely large and improbable values. Notice also how the uncertainty in the distribution for the difference between tPA and SK groups is greater than that of the contrasts between tPA or SK and the group with SK + tPA. This is because in our parameterization of the model the reference group (SK + tPA) doesn't get its own prior, but rather is only influenced by the intercept. The prior probability of 30-day mortality for the other two groups (tPA and SK), on the other hand is influenced by both the intercept and the $\beta$ terms. So our parameterization has inherently made the assumption that we are less certain at baseline about the prior for the tPA and SK groups, and more certain about the prior for the SK + tPA (reference) group. We know this isn't true, and in fact in Statistical Rethinking, Richard McElreath advocates for using an index variable approach to avoid this issue (i.e., over parameterizing the model such that each group of a factor variable has its own coefficient and thus prior). I did try this approach, however inefficiencies in sampling made it impractical for this exercise (drastically increased run time, reduced effective sample size). I beleive this is due to the high degree of correlation between some of the terms in the over parameterized version of the model. Regardless, while the priors for this version of the model do imply some less than ideal characteristics about our priors, the large sample size in our dataset will quickly wash out these minor differences.  
+  
+The minor issues discussed above aside, we do need to work on these priors to make them a bit more informative and skeptical of unrealistic differences between groups. In the end I settled on $\beta \sim Normal(0, 0.5)$. Using this prior leads to the following prior predictive plots:  
+  
+```{r, fig.align = "center", fig.height = 6, fig.width = 10}
+set.seed(11)
+intercept <- rnorm(10000, -2.5, 0.75)
+beta_1 <- rnorm(10000, 0, 0.5)
+
+set.seed(12)
+beta_2 <- rnorm(10000, 0, 0.5)
+
+df <- 
+  tibble(both = inv_logit_scaled(intercept),
+         tpa = inv_logit_scaled(intercept + beta_1),
+         sk = inv_logit_scaled(intercept + beta_2)) %>%
+  mutate(diff_1 = abs(both - tpa), diff_2 = abs(both - sk),
+         diff_3 = abs(tpa - sk))
+
+plt_1 <- 
+  ggplot(data = df, aes(x = diff_1)) + 
+  geom_density(fill = "darkblue") + 
+  labs(
+    x = "abs[Pr(day30 = 1 | tx = SK + tPA) - Pr(day30 = 1 | tx = tPA)]",
+    y = "Density",
+    subtitle = "Prior: Treatment Contrast (SK + tPA vs. tPA)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plt_2 <- 
+  ggplot(data = df, aes(x = diff_2)) + 
+  geom_density(fill = "darkgreen") + 
+  labs(
+    x = "abs[Pr(day30 = 1 | tx = SK + tPA) - Pr(day30 = 1 | tx = SK)]",
+    y = "Density",
+    subtitle = "Prior: Treatment Contrast (SK + tPA vs. SK)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plt_3 <- 
+  ggplot(data = df, aes(x = diff_3)) + 
+  geom_density(fill = "darkred") + 
+  labs(
+    x = "abs[Pr(day30 = 1 | tx = tPA) - Pr(day30 = 1 | tx = SK)]",
+    y = "Density",
+    subtitle = "Prior: Treatment Contrast (tPA vs. SK)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plt_4 <- 
+  ggplot(data = df, aes(x = tpa)) + 
+  geom_density(fill = "purple") + 
+  labs(
+    x = "Pr(day30 = 1 | tx = tPA)",
+    y = "Density",
+    subtitle = "Prior: Specific Treatment (tPA)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plt_5 <- 
+  ggplot(data = df, aes(x = sk)) + 
+  geom_density(fill = "orange") + 
+  labs(
+    x = "Pr(day30 = 1 | tx = SK)",
+    y = "Density",
+    subtitle = "Prior: Specific Treatment (SK)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plt_6 <- 
+  ggplot(data = df, aes(x = both)) + 
+  geom_density(fill = "grey") + 
+  labs(
+    x = "Pr(day30 = 1 | tx = SK + tPA)",
+    y = "Density",
+    subtitle = "Prior: Specific Treatment (SK + tPA)"
+  ) + 
+  scale_x_continuous(limits = c(0, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title = element_text(size = 8)
+  )
+
+plot_grid(plt_1, plt_2, plt_3, plt_4, plt_5, plt_6, ncol = 3, align = "hv")
+```  
+  
+These look much better. In the top row, we see that the predicted differences in probabilities between groups implied by our priors are appropriately clumped up near the lower end of the spectrum. Again we see that the predicted 30-day mortality in the combined SK + tPA group has less uncertainty (a more narrow prior distribution), but this is much less pronounced with our new $\beta$ priors due to their reduced variability. We'll move forward with this set of priors, making our final base model:  
+<br>
+<center> $day30_i \sim Bernoulli(p_i)$</center>  
+<br>
+<center> $p_i \sim intercept + \beta_{tPA}(tPA_i) + \beta_{SK}(SK_i)$</center>
+<br>
+<center> $intercept \sim Normal(-2.5, 0.75)$</center>  
+<br>
+<center> $\beta \sim Normal(0, 0.5)$</center>
+<br>
+We'll run this in *brms*. For all of our models we'll run 4 chains, each with 2000 total iterations (1000 of which will be warmup iterations).  
+  
+```{r base model, echo = TRUE, cache = TRUE, include = TRUE, eval = FALSE}
+m_base <-
+  brm(
+    data = gusto,
+    family = bernoulli,
+    formula =
+      day30 ~ 0 + intercept + tx,
+    prior = c(prior(normal(-2.5, 0.75), class = b, coef = "intercept"),
+              prior(normal(0, 0.5), class = b, coef = "txSK"),
+              prior(normal(0, 0.5), class = b, coef = "txtPA")),
+    iter = 2000, warmup = 1000, 
+    chains = 4, cores = 4,
+    seed = 11,
+    sample_prior = TRUE
+  )
+
+m_base <- add_criterion(m_base, "waic")
+```  
+  
+### Diagnostics
+For this project we'll look at a few items to diagnose any problems with the MCMC sampling process: (1) trace plots, (2) Rhat values, and (3) effective sample size ratios. This only scratches the surface of MCMC diagnostics, but should cover any major issues we may run into.
+  
+```{r, cache = FALSE, fig.width = 8, fig.height = 3, fig.align = "center"}
+diag_plot <- function(model, pars_list, ncol_trace){
+
+  color_scheme_set("mix-blue-red")
+  plt_1 <- 
+    mcmc_trace(as.array(model), 
+               pars = pars_list,
+               facet_args = list(ncol = ncol_trace, 
+                                 strip.position = "left")) + 
+    base_theme + 
+    theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_blank(),
+      legend.position = "none"
+    )
+    
+  
+  color_scheme_set("red")
+  plt_2 <- 
+    neff_ratio(model, 
+               pars = pars_list) %>%
+    mcmc_neff() +
+    base_theme + 
+    theme(
+      legend.position = "none"
+    )
+  
+  
+  plt_3 <-
+    rhat(model, pars = pars_list) %>%
+    mcmc_rhat() + 
+    base_theme + 
+    theme(
+      legend.position = "none"
+    )
+  
+  grid <-
+    plot_grid(plt_2, plt_3, ncol = 2, align = "hv", axis = "b",
+              rel_widths = c(1, 0.5))
+  
+  plot_grid(plt_1, grid, ncol = 1, align = "hv", axis = "l",
+            rel_heights = c(0.5, 1))
+  
+}
+
+diag_plot(model = m_base,
+          pars_list = c("b_intercept", "b_txSK", "b_txtPA"),
+          ncol_trace = 3)
+```  
+  
+Our trace plots look good and all the Rhat values = 1. Our effective N / N ratios aren't great here, though. That said, we still have over 1000 effective samples for each parameter which is more than enough to get a good posterior sample. Truth be told, I'm not sure why this particular parameterization causes this problem, but we'll see in the next model that with added terms our sampling efficiency improves dramatically.  
+  
+### Results  
+From this base model we can look at some of our treatment estimates. Here we plot the distribution of predicted probabilities of 30-day mortality for patients receiving either tPA or SK on the probability scale. We also plot the contrast between these two distributions (tPA - SK) which represents the distribution of predicted ARR. Finally, we can plot the risk ratio for tPA vs. SK by dividing the tPA distribution by the SK distribution. Each distribution is displayed with an 89% credible interval.  
+  
+```{r base model prob plots, fig.width = 4, fig.height = 4}
+post_probs <- 
+  posterior_samples(m_base) %>%
+  as_tibble() %>%
+  mutate(
+    pred_tpa = inv_logit_scaled(b_intercept + b_txtPA),
+    pred_sk = inv_logit_scaled(b_intercept + b_txSK)
+  ) %>%
+  mutate(
+    arr = pred_sk - pred_tpa,
+    rr = pred_tpa / pred_sk
+  ) %>%
+  select(arr, rr, pred_tpa, pred_sk) %>%
+  gather()
+
+ggplot(
+  data = post_probs %>% filter(!key %in% c("arr", "rr"))
+) + 
+  geom_halfeyeh(
+    aes(
+      x = value,
+      y = key
+    ),
+    fill = "darkred",
+    .width = 0.89
+  ) + 
+  labs(
+    x = "Probability of Death at 30 Days",
+    y = NULL,
+    subtitle = "Base Model"
+  ) + 
+  scale_y_discrete(breaks = c("pred_tpa", "pred_sk"),
+                   labels = c("tPA", "SK")) + 
+  base_theme
+
+arr_plt <- 
+  ggplot(
+    data = post_probs %>% filter(key == "arr")
+  ) + 
+  geom_halfeyeh(
+    aes(
+      x = value,
+      y = 0
+    ),
+    fill = "darkblue",
+    .width = 0.89
+  ) + 
+  labs(
+    x = "Absolute Risk Reduction (SK - tPA)",
+    y = NULL,
+    subtitle = "Base Model"
+  ) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+rr_plt <- 
+  ggplot(
+    data = post_probs %>% filter(key == "rr")
+  ) + 
+  geom_halfeyeh(
+    aes(
+      x = value,
+      y = 0
+    ),
+    fill = "darkgreen",
+    .width = 0.89
+  ) + 
+  labs(
+    x = "Relative Risk (tPA / SK)",
+    y = NULL,
+    subtitle = "Base Model"
+  ) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+plot_grid(arr_plt, rr_plt, ncol = 1, align = "hv")
+```  
+  
+These results are well aligned with the primary findings of the GUSTO-I trial which is reassuring.  
+  
+Next let's add in some of our predictors. We'll add the categorical variables first.  
+  
+## Categorical Model  
+We'll now add in the three baseline categorical variables in the dataset: (1) Killip class (a risk stratification score); (2) history of previous MI; and (3) location of MI. Now that we have additional categorical variables, each with their own reference class, our intercept represents the log odds of 30-day mortality in patients receiving SK + tPA who are Killip class I, have not had a prior MI, with a new MI in the inferior wall of the heart. While this may slightly change our prior for the intercept it won't make a major difference and I'll leave it consistent with the base model. We'll also continue to use the same prior for our new $\beta$ coefficients as well.  
+  
+```{r, cache = TRUE, include = TRUE, echo = TRUE, eval = FALSE}
+m_cat <-
+  brm(
+    data = gusto,
+    family = bernoulli,
+    formula =
+      day30 ~ 0 + intercept + tx + Killip + pmi + miloc,
+    prior = c(prior(normal(-2.5, 0.75), class = b, coef = "intercept"),
+              prior(normal(0, 0.5), class = b, coef = "txSK"),
+              prior(normal(0, 0.5), class = b, coef = "txtPA"),
+              prior(normal(0, 0.5), class = b, coef = "KillipII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIV"),
+              prior(normal(0, 0.5), class = b, coef = "milocAnterior"),
+              prior(normal(0, 0.5), class = b, coef = "milocOther"),
+              prior(normal(0, 0.5), class = b, coef = "pmiyes")),
+    iter = 2000, warmup = 1000, 
+    chains = 4, cores = 4,
+    seed = 11,
+    sample_prior = TRUE
+  )
+
+m_cat <- add_criterion(m_cat, "waic")
+```  
+  
+### Diagnostics  
+```{r, cache = FALSE, fig.align = "center", fig.width = 8, fig.height = 5}
+diag_plot(model = m_cat,
+          pars_list = c("b_intercept", "b_txSK",
+                        "b_txtPA", "b_KillipII",
+                        "b_KillipIII", "b_KillipIV",
+                        "b_pmiyes", "b_milocOther",
+                        "b_milocAnterior"),
+          ncol_trace = 3)
+``` 
+  
+Again our traceplots and Rhat values are reassuring. Now, though, we see a much better set of N eff / N ratios.  
+  
+### Comparison
+But is this model any *better* than the base model? We can compare these two models using WAIC (widely applicable information criterion), effectively comparing their predicted out of sample fit. Below I've plotted the difference between the WAIC estimates for the models we want to compare, along with the standard error of those differences.       
+<br>
+```{r, cache = FALSE, fig.align = "center", fig.width = 5, fig.height = 2}
+w <- brms::loo_compare(m_base, m_cat, criterion = "waic")
+
+waic_plot <- function(w) {
+  w[, 1:2] %>% 
+  data.frame() %>% 
+  rownames_to_column(var = "model_name") %>% 
+  mutate(waic_diff = elpd_diff * -2,
+         se_waic_diff = se_diff * 2) %>% 
+  
+  ggplot(aes(x    = fct_reorder(model_name, waic_diff, .desc = TRUE), 
+             y    = waic_diff , 
+             ymin = waic_diff - se_waic_diff, 
+             ymax = waic_diff + se_waic_diff)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey80") + 
+  geom_pointrange(shape = 21, color = "black", fill = "grey80") +
+  coord_flip() +
+  labs(y = "Difference in WAIC from Best Fitting Model (± SE)", 
+       x = NULL,
+       subtitle = "WAIC Comparison") +
+  base_theme + 
+  theme(axis.ticks.y = element_blank())
+}
+
+waic_plot(w)
+```  
+<br>  
+Based on the above plot we can conclude that the categorical model represents an improvement over the base model with respect to predicted out of sample performance.  
+  
+## Continuous Model  
+Next we can add the continuous (scaled and centered) variables to our model.  
+  
+```{r categorical model, echo = TRUE, cache = TRUE, include = TRUE, eval = FALSE}
+m_cont <-
+  brm(
+    data = gusto,
+    family = bernoulli,
+    formula =
+      day30 ~ 0 + intercept + tx + age_s + pulse_s + sbp_s + 
+                  Killip + pmi + miloc,
+    prior = c(prior(normal(-2.5, 0.75), class = b, coef = "intercept"),
+              prior(normal(0, 0.5), class = b, coef = "txSK"),
+              prior(normal(0, 0.5), class = b, coef = "txtPA"),
+              prior(normal(0, 0.5), class = b, coef = "age_s"),
+              prior(normal(0, 0.5), class = b, coef = "pulse_s"),
+              prior(normal(0, 0.5), class = b, coef = "sbp_s"),
+              prior(normal(0, 0.5), class = b, coef = "KillipII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIV"),
+              prior(normal(0, 0.5), class = b, coef = "milocAnterior"),
+              prior(normal(0, 0.5), class = b, coef = "milocOther"),
+              prior(normal(0, 0.5), class = b, coef = "pmiyes")),
+    iter = 2000, warmup = 1000, 
+    chains = 4, cores = 4,
+    seed = 11,
+    sample_prior = TRUE
+  )
+
+m_cont <- add_criterion(m_cont, "waic")
+```  
+  
+### Diagnostics
+  
+```{r, cache = FALSE, fig.align = "center", fig.width = 8, fig.height = 4}
+diag_plot(model = m_cont,
+          pars_list = c("b_intercept", "b_txSK",
+                        "b_txtPA", "b_KillipII",
+                        "b_KillipIII", "b_KillipIV",
+                        "b_pmiyes", "b_milocOther",
+                        "b_milocAnterior",
+                        "b_sbp_s", "b_pulse_s", "b_age_s"),
+          ncol_trace = 4)
+```  
+  
+Again our traceplots look good, our Rhat values are all 1 and our N eff / N ratios are excellent.  
+  
+### Comparison
+Using the same method we again find that our new model represents an incremental improvement over the base and categorical models with respect to predicted out of sample performance.  
+<br>
+```{r categorical model comparison, cache = FALSE, fig.align = "center", fig.width = 5, fig.height = 2}
+w <- loo_compare(m_base, m_cat, m_cont, criterion = "waic")
+
+waic_plot(w)
+```  
+  
+## Spline Model  
+  
+Now we'll extend our current model by using thin plate splines to model the continuous variables, allowing for a non-linear relationship between these variables and the log odds of 30-day mortality.  
+  
+```{r spline model, echo = TRUE, include = TRUE, eval = FALSE}
+m_spline <-
+  brm(
+    data = gusto,
+    family = bernoulli,
+    formula =
+      day30 ~ 0 + intercept + tx + s(age_s) + s(pulse_s) + s(sbp_s) + 
+                  Killip + pmi + miloc,
+    prior = c(prior(normal(-2.5, 0.75), class = b, coef = "intercept"),
+              prior(normal(0, 0.5), class = b, coef = "txSK"),
+              prior(normal(0, 0.5), class = b, coef = "txtPA"),
+              prior(normal(0, 0.5), class = b, coef = "sage_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "spulse_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "ssbp_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "KillipII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIV"),
+              prior(normal(0, 0.5), class = b, coef = "milocAnterior"),
+              prior(normal(0, 0.5), class = b, coef = "milocOther"),
+              prior(normal(0, 0.5), class = b, coef = "pmiyes"),
+              prior(exponential(1), class = sds, coef = "s(age_s)"),
+              prior(exponential(1), class = sds, coef = "s(pulse_s)"),
+              prior(exponential(1), class = sds, coef = "s(sbp_s)")),
+    iter = 2000, warmup = 1000, 
+    chains = 4, cores = 4,
+    seed = 11,
+    control = list(adapt_delta = 0.99),
+    sample_prior = TRUE
+  )
+
+m_spline <- add_criterion(m_spline, "waic")
+```  
+  
+### Diagnostics  
+<br>
+```{r, cache = FALSE, fig.align = "center", fig.width = 8, fig.height = 5}
+diag_plot(model = m_spline,
+          pars_list = c("b_intercept", "b_txSK",
+                        "b_txtPA", "b_KillipII",
+                        "b_KillipIII", "b_KillipIV",
+                        "b_pmiyes", "b_milocOther",
+                        "b_milocAnterior",
+                        "bs_sage_s_1", "bs_spulse_s_1", "bs_ssbp_s_1",
+                        "sds_sage_s_1", "sds_spulse_s_1",
+                        "sds_ssbp_s_1"),
+          ncol_trace = 5)
+```  
+  
+We see good mixing on our trace plots, N eff / N ratios all within an appropriate range, and Rhat values all very close to 1.  
+  
+### Comparison  
+  
+```{r, cache = FALSE, fig.align = "center", fig.width = 5, fig.height = 2}
+w <- loo_compare(m_base, m_cat, m_cont, m_spline, criterion = "waic")
+
+waic_plot(w)
+```  
+  
+Here we see that modeling our continuous variables using splines provided an incremental (albeit less extreme than the previous models) improvement in predicted out of sample performance.  
+  
+## Interaction Model  
+  
+Here we have fit a full interaction model (treatment x covariate interactions for all 6 covariates).  
+  
+```{r interaction model, echo = TRUE, cache = TRUE, include = TRUE, eval = FALSE}
+m_int <-
+  brm(
+    data = gusto,
+    family = bernoulli,
+    formula =
+      day30 ~ 0 + intercept + tx + 
+                  s(age_s) + s(pulse_s) + s(sbp_s) + 
+                  s(age_s, by = tx) + s(pulse_s, by = tx) + s(sbp_s, by = tx) +
+                  Killip + pmi + miloc + 
+                  tx:Killip + tx:pmi + tx:miloc,
+    prior = c(prior(normal(-2.5, 0.75), class = b, coef = "intercept"),
+              prior(normal(0, 0.5), class = b, coef = "txSK"),
+              prior(normal(0, 0.5), class = b, coef = "txtPA"),
+              prior(normal(0, 0.5), class = b, coef = "sage_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "spulse_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "ssbp_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "KillipII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIV"),
+              prior(normal(0, 0.5), class = b, coef = "milocAnterior"),
+              prior(normal(0, 0.5), class = b, coef = "milocOther"),
+              prior(normal(0, 0.5), class = b, coef = "pmiyes"),
+              prior(normal(0, 0.1), class = b, coef = "sage_s:txSK_1"),
+              prior(normal(0, 0.1), class = b, coef = "sage_s:txSKPtPA_1"),
+              prior(normal(0, 0.1), class = b, coef = "sage_s:txtPA_1"),
+              prior(normal(0, 0.1), class = b, coef = "spulse_s:txSK_1"),
+              prior(normal(0, 0.1), class = b, coef = "spulse_s:txSKPtPA_1"),
+              prior(normal(0, 0.1), class = b, coef = "spulse_s:txtPA_1"),
+              prior(normal(0, 0.1), class = b, coef = "ssbp_s:txSK_1"),
+              prior(normal(0, 0.1), class = b, coef = "ssbp_s:txSKPtPA_1"),
+              prior(normal(0, 0.1), class = b, coef = "ssbp_s:txtPA_1"),
+              prior(normal(0, 0.1), class = b, coef = "txSK:KillipII"),
+              prior(normal(0, 0.1), class = b, coef = "txSK:KillipIII"),
+              prior(normal(0, 0.1), class = b, coef = "txSK:KillipIV"),
+              prior(normal(0, 0.1), class = b, coef = "txtPA:KillipII"),
+              prior(normal(0, 0.1), class = b, coef = "txtPA:KillipIII"),
+              prior(normal(0, 0.1), class = b, coef = "txtPA:KillipIV"),
+              prior(normal(0, 0.1), class = b, coef = "txSK:pmiyes"),
+              prior(normal(0, 0.1), class = b, coef = "txtPA:pmiyes"),
+              prior(normal(0, 0.1), class = b, coef = "txSK:milocAnterior"),
+              prior(normal(0, 0.1), class = b, coef = "txSK:milocOther"),
+              prior(normal(0, 0.1), class = b, coef = "txtPA:milocAnterior"),
+              prior(normal(0, 0.1), class = b, coef = "txtPA:milocOther"),
+              prior(exponential(1), class = sds, coef = "s(age_s)"),
+              prior(exponential(1), class = sds, coef = "s(pulse_s)"),
+              prior(exponential(1), class = sds, coef = "s(sbp_s)"),
+              prior(exponential(1), class = sds, coef = "s(age_s,by=tx)"),
+              prior(exponential(1), class = sds, coef = "s(pulse_s,by=tx)"),
+              prior(exponential(1), class = sds, coef = "s(sbp_s,by=tx)")
+              ),
+    iter = 2000, warmup = 1000, 
+    chains = 4, cores = 4,
+    seed = 11,
+    control = list(adapt_delta = 0.99),
+    sample_prior = TRUE
+  )
+
+m_int<- add_criterion(m_int, "waic")
+```  
+  
+### Diagnostics 
+<br>
+```{r, cache = FALSE, fig.align = "center", fig.width = 8, fig.height = 8}
+diag_plot(model = m_int,
+          pars_list = c("b_intercept", "b_txSK",
+                        "b_txtPA", "b_KillipII",
+                        "b_KillipIII", "b_KillipIV",
+                        "b_pmiyes", "b_milocOther",
+                        "b_milocAnterior",
+                        "bs_sage_s_1", "bs_spulse_s_1", "bs_ssbp_s_1",
+                        "sds_sage_s_1", "sds_spulse_s_1",
+                        "sds_ssbp_s_1", "b_txtPA:KillipII",
+                        "b_txtPA:KillipIII", "b_txtPA:KillipIV",
+                        "b_txtPA:pmiyes", "b_txtPA:milocOther",
+                        "b_txtPA:milocAnterior",
+                        "bs_sage_s:txSKPtPA_1", "bs_sage_s:txtPA_1",
+                        "bs_sage_s:txSK_1", "bs_spulse_s:txSKPtPA_1",
+                        "bs_spulse_s:txtPA_1", "bs_spulse_s:txSK_1",
+                        "bs_ssbp_s:txSKPtPA_1", "bs_ssbp_s:txtPA_1",
+                        "bs_ssbp_s:txSK_1", "sds_sage_stxSKPtPA_1",
+                        "sds_sage_stxSK_1", "sds_sage_stxtPA_1",
+                        "sds_spulse_stxSKPtPA_1", "sds_spulse_stxSK_1",
+                        "sds_spulse_stxtPA_1", "sds_ssbp_stxSKPtPA_1",
+                        "sds_ssbp_stxSK_1", "sds_ssbp_stxtPA_1"),
+          ncol_trace = 13)
+```  
+  
+We have quite a few parameters in this model, but our trace plots all look good as do the Rhat and N eff / N ratios.  
+  
+### Comparison  
+  
+```{r, cache = FALSE, fig.align = "center", fig.width = 5, fig.height = 2}
+w <- loo_compare(m_base, m_cat, m_cont, m_spline, m_int, criterion = "waic")
+
+waic_plot(w)
+```  
+  
+For the first time it appears that the change in our model did **not** provide a meaningful change in WAIC. While we did use *somewhat* narrow priors, the amount of regularization provided by $\beta_{interaction} \sim Normal(0, 0.1)$ shouldn't preclude a real interaction effect present in the data from effectively shining through in the final posterior distribution. Thus, we can take this as evidence *against* true HTE (on the relative scale).  
+  
+## Subgroups Model  
+  
+Another way to approach the question of HTE is to *a priori* define subgroups of patients that are hypothesized to be good candidates for HTE. For the purposes of this project I created a set of 8 unique subgroups by based on centered/scaled age (> or < 0), Killip score (I & II or III & IV) and history of previous MI (yes and no). We can then use a multilevel model, where the intercept and treatment effect is clustered on subgroup. In this parameterization we can take advantage of the "partial pooling" effect whereby estimates for the intercept and treatment effect coefficients are shrunk towards the overall mean effect in the entire population. (ADD MORE HERE!!)  
+  
+```{r random effects model, echo = TRUE, cache = TRUE, include = TRUE, eval = FALSE}
+m_random <-
+  brm(
+    data = gusto,
+    family = bernoulli,
+    formula =
+      day30 ~ 1 + tx + (1 + tx | group_id) + s(age_s) + s(pulse_s) + s(sbp_s) + 
+                  Killip + pmi + miloc,
+    prior = c(prior(normal(-2.5, 0.75), class = Intercept),
+              prior(normal(0, 0.5), class = b, coef = "txSK"),
+              prior(normal(0, 0.5), class = b, coef = "txtPA"),
+              prior(normal(0, 0.5), class = b, coef = "sage_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "spulse_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "ssbp_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "KillipII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIV"),
+              prior(normal(0, 0.5), class = b, coef = "milocAnterior"),
+              prior(normal(0, 0.5), class = b, coef = "milocOther"),
+              prior(normal(0, 0.5), class = b, coef = "pmiyes"),
+              prior(exponential(1), class = sds, coef = "s(age_s)"),
+              prior(exponential(1), class = sds, coef = "s(pulse_s)"),
+              prior(exponential(1), class = sds, coef = "s(sbp_s)"),
+              prior(exponential(1), class = sd, coef = "Intercept", group = "group_id"),
+              prior(exponential(1), class = sd, coef = "txSK", group = "group_id"),
+              prior(exponential(1), class = sd, coef = "txtPA", group = "group_id"),
+              prior(lkj(2), class = cor, group = "group_id")),
+    iter = 2000, warmup = 1000, 
+    chains = 4, cores = 4,
+    seed = 11,
+    control = list(adapt_delta = 0.99)
+  )
+
+m_random <- add_criterion(m_random, "waic")
+```  
+  
+### Diagnostics  
+<br>
+```{r, cache = FALSE, fig.align = "center", fig.width = 8, fig.height = 6}
+diag_plot(model = m_random,
+          pars_list = c("b_Intercept", "b_txSK",
+                        "b_txtPA", "b_KillipII",
+                        "b_KillipIII", "b_KillipIV",
+                        "b_pmiyes", "b_milocOther",
+                        "b_milocAnterior",
+                        "bs_sage_s_1", "bs_spulse_s_1", "bs_ssbp_s_1",
+                        "sds_sage_s_1", "sds_spulse_s_1",
+                        "sds_ssbp_s_1", "cor_group_id__Intercept__txSK",
+                        "cor_group_id__Intercept__txtPA", "cor_group_id__txSK__txtPA",
+                        "sd_group_id__Intercept", "sd_group_id__txSK",
+                        "sd_group_id__txtPA"),
+          ncol_trace = 7)
+```  
+  
+### Comparison  
+  
+```{r, cache = FALSE, fig.align = "center", fig.width = 5, fig.height = 2}
+w <- loo_compare(m_base, m_cat, m_cont, m_spline, m_int, m_random, criterion = "waic")
+
+waic_plot(w)
+```  
+  
+## Cluster Model  
+  
+We can also use unsupervised clustering to derive our subgroups. (ADD MORE HERE!)  
+  
+```{r, echo = TRUE, include = TRUE, eval = FALSE}
+cont_vars <- 
+  gusto %>% 
+  select(sbp_s, pulse_s, age_s)
+
+cat_vars <-
+  gusto %>%
+  select(Killip, pmi, miloc)
+
+clust <- kamila(conVar = cont_vars, catFactor = cat_vars, 
+                numClust = 3,
+                numInit = 100)
+
+gusto <- 
+  gusto %>%
+  mutate(cluster = factor(clust$finalMemb))
+
+m_clust <-
+  brm(
+    data = gusto,
+    family = bernoulli,
+    formula =
+      day30 ~ 1 + tx + (1 + tx | cluster) + s(age_s) + s(pulse_s) + s(sbp_s) + 
+                  Killip + pmi + miloc,
+    prior = c(prior(normal(-2.5, 0.75), class = Intercept),
+              prior(normal(0, 0.5), class = b, coef = "txSK"),
+              prior(normal(0, 0.5), class = b, coef = "txtPA"),
+              prior(normal(0, 0.5), class = b, coef = "sage_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "spulse_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "ssbp_s_1"),
+              prior(normal(0, 0.5), class = b, coef = "KillipII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIII"),
+              prior(normal(0, 0.5), class = b, coef = "KillipIV"),
+              prior(normal(0, 0.5), class = b, coef = "milocAnterior"),
+              prior(normal(0, 0.5), class = b, coef = "milocOther"),
+              prior(normal(0, 0.5), class = b, coef = "pmiyes"),
+              prior(exponential(1), class = sds, coef = "s(age_s)"),
+              prior(exponential(1), class = sds, coef = "s(pulse_s)"),
+              prior(exponential(1), class = sds, coef = "s(sbp_s)"),
+              prior(exponential(1), class = sd, coef = "Intercept", group = "cluster"),
+              prior(exponential(1), class = sd, coef = "txSK", group = "cluster"),
+              prior(exponential(1), class = sd, coef = "txtPA", group = "cluster"),
+              prior(lkj(2), class = cor, group = "cluster")),
+    iter = 2000, warmup = 1000, 
+    chains = 4, cores = 4,
+    seed = 11,
+    control = list(adapt_delta = 0.99)
+  )
+
+m_clust <- add_criterion(m_clust, "waic")
+```  
+  
+### Diagnostics  
+<br>
+```{r, cache = FALSE, fig.align = "center", fig.width = 8, fig.height = 6}
+diag_plot(model = m_clust,
+          pars_list = c("b_Intercept", "b_txSK",
+                        "b_txtPA", "b_KillipII",
+                        "b_KillipIII", "b_KillipIV",
+                        "b_pmiyes", "b_milocOther",
+                        "b_milocAnterior",
+                        "bs_sage_s_1", "bs_spulse_s_1", "bs_ssbp_s_1",
+                        "sds_sage_s_1", "sds_spulse_s_1",
+                        "sds_ssbp_s_1", "cor_cluster__Intercept__txSK",
+                        "cor_cluster__Intercept__txtPA", 
+                        "cor_cluster__txSK__txtPA", "sd_cluster__Intercept",
+                        "sd_cluster__txSK", "sd_cluster__txtPA"),
+          ncol_trace = 7)
+```  
+  
+### Comparison  
+  
+```{r, cache = FALSE, fig.align = "center", fig.width = 5, fig.height = 2}
+w <- loo_compare(m_base, m_cat, m_cont, m_spline, m_int, m_random, m_clust, criterion = "waic")
+
+waic_plot(w)
+```  
+  
+# Patient Specific Efficacy Estimates
+
+```{r}
+patient_estimate <- 
+  function(age_s, pulse_s, sbp_s, Killip, pmi, miloc,
+           label = "pt_1", draws = 4000) {
+    
+    draws <- min(draws, 4000)
+    
+    draw_sk <- fitted_draws(m_int, newdata = tibble(age_s = age_s,
+                                                    pulse_s = pulse_s,
+                                                    sbp_s = sbp_s,
+                                                    Killip = Killip,
+                                                    pmi = pmi,
+                                                    miloc = miloc,
+                                                    tx = "SK"),
+                            n = draws)
+    
+    draw_tpa <- fitted_draws(m_int, newdata = tibble(age_s = age_s,
+                                                    pulse_s = pulse_s,
+                                                    sbp_s = sbp_s,
+                                                    Killip = Killip,
+                                                    pmi = pmi,
+                                                    miloc = miloc,
+                                                    tx = "tPA"),
+                             n = draws)
+    
+    out <- 
+      tibble(label = rep(label, each = draws), 
+             sk_risk = draw_sk$.value, 
+             tpa_risk = draw_tpa$.value,
+             arr = sk_risk - tpa_risk,
+             rr = tpa_risk / sk_risk,
+             or = exp(qlogis(tpa_risk) - qlogis(sk_risk)))
+    
+  }
+```  
+  
+```{r}
+vals <- patient_estimate(age_s = c(1, 0), pulse_s = c(0, 0), sbp_s = c(-0.5, 0), Killip = c("IV", "I"), pmi = c("yes", "no"), miloc = c("Anterior", "Inferior"), label = c("pt_high", "pt_low"))
+
+plt_1 <- 
+  ggplot(data = vals %>% select(label, sk_risk, tpa_risk) %>%
+           gather("key", "value", -label)) + 
+  geom_halfeyeh(aes(x = value, y = key)) + 
+  facet_wrap(~label, scales = "free") +
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+plt_2 <- 
+  ggplot(data = vals) + 
+  geom_halfeyeh(aes(x = arr, y = label)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+```
+
+
+
