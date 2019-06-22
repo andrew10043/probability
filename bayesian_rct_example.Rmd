@@ -26,6 +26,7 @@ library(kamila)
 library(tidybayes)
 library(bayesplot)
 library(extrafont)
+library(rethinking)
 
 # Load models
 load("~/Desktop/academic/research/other/probability/bayesian_rct_example_data.Rdata")
@@ -55,13 +56,13 @@ gusto <-
 ```
 # Background  
   
-This is a Bayesian adaptation and extension of Frank Harrell's post titled: *["Assessing Heterogeneity of Treatment Effect, Estimating Patient-Specific Efficacy, and Studying Variation in Odds Ratios, Risk Ratios, and Risk Differences"](https://www.fharrell.com/post/varyor/)*. The goal of this project is to provide a Bayesian framework with which we can: (1) explore the presence/absence of heterogeneity of treatment effect (HTE) and (2) model patient-specific treatment efficacy on multiple scales (i.e., ARR, RR, OR). While some consider HTE to be present if risk varies on the either the relative or absolute scale, others consider these to be separate phenomena (i.e., *true HTE* on the relative scale vs. *risk magnification* on the absolute scale). Regardless of terminology, a framework to model and adequately present these variations in risk is, in my opinion, essential when interpreting and applying the results of randomized controlled trials. There are several excellent reviews of this topic that cover the nuances in both its terminology and application in detail ([**1**](https://www.bmj.com/content/363/bmj.k4245/article-info), [**2**](https://www.fharrell.com/post/hteview/)).  
+This is a Bayesian partial adaptation and extension of Frank Harrell's post titled: *["Assessing Heterogeneity of Treatment Effect, Estimating Patient-Specific Efficacy, and Studying Variation in Odds Ratios, Risk Ratios, and Risk Differences"](https://www.fharrell.com/post/varyor/)*. The goal of this project is to provide a Bayesian framework with which we can: (1) explore the presence/absence of heterogeneity of treatment effect (HTE) and (2) model patient-specific treatment efficacy on multiple scales (e.g., ARR, RR, OR). While some consider HTE to be present if risk varies on the either the relative *or* absolute scale, others consider these to be separate phenomena (i.e., *true HTE* on the relative scale vs. *risk magnification* on the absolute scale). Regardless of terminology, a framework to model and adequately present these variations in risk is, in my opinion, essential when interpreting and applying the results of randomized controlled trials. There are several excellent reviews of this topic that cover the nuances in both its terminology and application in detail ([**1**](https://www.bmj.com/content/363/bmj.k4245/article-info), [**2**](https://www.fharrell.com/post/hteview/)).  
   
 For this project, we will use data from the [GUSTO-I trial](https://www.nejm.org/doi/pdf/10.1056/NEJM199309023291001) by Eric Topol and colleagues. This trial (published in 1993, prior to PCI becoming standard of care for acute STEMI) enrolled patients with myocardial infarction and examined relative efficacy of four different thrombolytic regimens: (1) streptokinase (SK) + subcutaneous heparin; (2) SK + intravenous heparin; (3) tPA + intravenous heparin; and (4) tPA + SK + intravenous heparin. For the purposes of this project, we will be condensing the two groups receiving SK, and will primarily be examining the relative difference between SK-only regimens (n = 20,162) and tPA-only (n = 10,348) regimens (we will not be specifically examining the combined SK + tPA group). We will still use patients in the SK + tPA group to build our models, though, as their data can help inform the relationship between the additional baseline variables and risk. The major outcome in this trial was 30-day mortality, and several baseline variables were collected.
   
 For this project we will walk through the modeling process step-by-step using the *brms* package, with visualizations using *tidybayes*, *bayesplot* and, of course, *ggplot2*. We will do some prior-predictive simulation to pick reasonable priors, and will perform some basic model diagnostics.    
   
-As a final note, I am in no way an expert on trials or Bayesian modeling. This serves as a learning exercise for me, and I hope it is helpful for others who are equally interested in these concepts. With that said, I greatly appreciate any and all feedback that may improve on this work. Feel free to reach out at *benjamin.andrew@duke.edu* with any comments. The code for this project is freely available at *www.github.com .... *.  
+As a final note, I am in no way an expert on trials or Bayesian modeling. These are very simple models and the model building process is far from comprehensive. This serves as a learning exercise for me, and I hope it is helpful for others who are equally interested in these concepts. With that said, I greatly appreciate any and all feedback that may improve on this work. Feel free to reach out at *benjamin.andrew@duke.edu* with any comments. The code for this project is freely available on [GitHub](https://github.com/andrew10043/probability/blob/master/bayesian_rct_example.Rmd).  
   
 # Data Preparation and Exploration  
   
@@ -189,9 +190,9 @@ We'll start with a base model containing just the treatment. When defining this 
 <br>
 <center> $p_i \sim intercept + \beta_{tPA}(tPA_i) + \beta_{SK}(SK_i)$</center>
 <br>
-Where $tPA_i$ is the tPA status (0/1) of each patient, and $SK_i$ is the SK status (0/1) of each patient. Thus, the intercept here represents the log-odds of 30-day mortality in patients receiving SK + tPA. We can use this information to start thinking about reasonable priors. In a similar [study](https://www.ncbi.nlm.nih.gov/pubmed/1975322) published in the Lancet a few years prior to the GUSTO-I trial, patients with suspected acute myocardial infarction received either tPA or SK. In-hospital mortality in this study was 8.9% and 8.5% in the two treatment groups, respectively. We can use this data to inform our prior for the intercept in this base model. Let's imagine we use a broad (on the probability scale), rather uninformative prior such as $intercept \sim Normal(0, 1.5)$. Below I've plotted the result of 10,000 random draws from this prior on the log odds scaled (left) and probability scale (right).  
+Where $tPA_i$ is the tPA status (0/1) of each patient, and $SK_i$ is the SK status (0/1) of each patient. Thus, the intercept here represents the log-odds of 30-day mortality in patients receiving SK + tPA. We can use this information to start thinking about reasonable priors. In a similar [study](https://www.ncbi.nlm.nih.gov/pubmed/1975322) published in the Lancet a few years prior to the GUSTO-I trial, patients with suspected acute myocardial infarction received either tPA or SK. In-hospital mortality in this study was 8.9% and 8.5% in the two treatment groups, respectively. We can use this data to inform our prior for the intercept in this base model. Let's imagine we use a broad (on the probability scale), rather uninformative prior such as $intercept \sim Normal(0, 1.5)$. Below I've plotted the result of 10,000 random draws from this prior on the log odds scale (left) and probability scale (right).  
   
-```{r, fig.align = "center", fig.width = 6, fig.height = 2}
+```{r, cache = FALSE, fig.align = "center", fig.width = 6, fig.height = 2}
 set.seed(11)
 intercept <- rnorm(10000, 0, 1.5)
 
@@ -200,7 +201,7 @@ df <- tibble(lo = intercept,
 
 lo_plt <- 
   ggplot(data = df, aes(x = lo)) + 
-  geom_density(fill = "darkblue") + 
+  geom_density(fill = "blue") + 
   labs(
     x = "Log Odds(day30 = 1)",
     y = "Density",
@@ -229,7 +230,7 @@ pr_plt <-
 plot_grid(lo_plt, pr_plt, ncol = 2, align = "hv")  
 ```  
   
-This is a very broad and unnecessarily uninformative prior. Let's instead use the data from a prior study to develop a moderately informative prior. With an expected in-hospital mortality less than 10% we should aim for a prior that places most of its weight in the low probability zone, while still allowing for larger than expected effects to shine through (if present in the data). For this purpose I settled on $intercept \sim Normal(-2.5, 0.75)$. Here are the resultant prior distributions:  
+This is a very broad and unnecessarily uninformative prior that gives too much weight to unrealistic values. Let's instead use the data from our prior study to develop a moderately informative prior. With an expected in-hospital mortality less than 10% we should aim for a prior that places most of its weight in the low probability zone, while still allowing for larger than expected effects to shine through (if present in the data). For this purpose I settled on $intercept \sim Normal(-2.5, 0.75)$. Here are the resultant prior predictive simulations:  
   
 ```{r, fig.align = "center", fig.width = 6, fig.height = 2}
 set.seed(11)
@@ -240,7 +241,7 @@ df <- tibble(lo = intercept,
 
 lo_plt <- 
   ggplot(data = df, aes(x = lo)) + 
-  geom_density(fill = "darkblue") + 
+  geom_density(fill = "blue") + 
   labs(
     x = "Log Odds(day30 = 1)",
     y = "Density",
@@ -271,9 +272,9 @@ plot_grid(lo_plt, pr_plt, ncol = 2, align = "hv")
   
 This looks more appropriate. The bulk of the density is below a 20% probability of 30-day mortality in the combined SK + tPA group, but the extended tail does allow for more extreme cases. The mean probability for 30-day mortality in the SK + tPA for this distribution is `r round(mean(df$pr), 3)`.  
   
-Now let's turn our attention to the prior to $\beta_{SK}$ and $\beta_{tPA}$. I like Richard McElreath's approach to prior simulation for these coefficients. We can again start with a relatively broad and uninformative prior: $\beta \sim Normal(0, 3)$. Below I've plotted results from another 10,000 simulations from this distribution. This time we'll look at the *difference* in probability between groups that is implied by the prior (top row below). For these plots, we'll use our intercept distribution, and then generate a distribution of probabilities for 30-day mortality for each of the three groups based on our $\beta$ prior. We can then plot the absolute value of differences in these probabilities to get an idea of how big an effect our prior is assuming the treatment will have. We'll also plot the prior distributions for the probability of 30-day mortality by group (bottom row).  
+Now let's turn our attention to the prior to $\beta_{SK}$ and $\beta_{tPA}$. I like Richard McElreath's approach to prior simulation for these coefficients. We can again start with a relatively broad and uninformative prior: $\beta \sim Normal(0, 3)$. Below I've plotted results from another 10,000 simulations from this distribution. This time we'll look at the *difference* in probability between groups that is implied by the prior (top row in the figure below). For these plots, we'll use our intercept distribution, and then generate a distribution of probabilities for 30-day mortality for each of the three groups based on our $\beta$ priors. We can then plot the absolute value of differences in these probabilities to get an idea of how big an effect our prior is assuming the treatment will have. We'll also plot the prior distributions for the probability of 30-day mortality by group (bottom row).  
   
-```{r, fig.align = "center", fig.height = 6, fig.width = 10}
+```{r, cache = FALSE, fig.align = "center", fig.height = 6, fig.width = 10}
 set.seed(11)
 intercept <- rnorm(10000, -2.5, 0.75)
 beta_1 <- rnorm(10000, 0, 3)
@@ -290,7 +291,7 @@ df <-
 
 plt_1 <- 
   ggplot(data = df, aes(x = diff_1)) + 
-  geom_density(fill = "darkblue") + 
+  geom_density(fill = "blue") + 
   labs(
     x = "abs[Pr(day30 = 1 | tx = SK + tPA) - Pr(day30 = 1 | tx = tPA)]",
     y = "Density",
@@ -387,11 +388,11 @@ plt_6 <-
 plot_grid(plt_1, plt_2, plt_3, plt_4, plt_5, plt_6, ncol = 3, align = "hv")
 ```  
   
-A few things to note about these results. While the bulk of the density for the differences in probability between treatments lies below 25%, there is a large portion of the distribution extends to extremely large and improbable values. Notice also how the uncertainty in the distribution for the difference between tPA and SK groups is greater than that of the contrasts between tPA or SK and the group with SK + tPA. This is because in our parameterization of the model the reference group (SK + tPA) doesn't get its own prior, but rather is only influenced by the intercept. The prior probability of 30-day mortality for the other two groups (tPA and SK), on the other hand is influenced by both the intercept and the $\beta$ terms. So our parameterization has inherently made the assumption that we are less certain at baseline about the prior for the tPA and SK groups, and more certain about the prior for the SK + tPA (reference) group. We know this isn't true, and in fact in Statistical Rethinking, Richard McElreath advocates for using an index variable approach to avoid this issue (i.e., over parameterizing the model such that each group of a factor variable has its own coefficient and thus prior). I did try this approach, however inefficiencies in sampling made it impractical for this exercise (drastically increased run time, reduced effective sample size). I beleive this is due to the high degree of correlation between some of the terms in the over parameterized version of the model. Regardless, while the priors for this version of the model do imply some less than ideal characteristics about our priors, the large sample size in our dataset will quickly wash out these minor differences.  
+A few things to note about these results. While the bulk of the density for the differences in probability between treatments lies below 25%, there is a large portion of the distribution extends to extremely large and improbable values. Notice also how the uncertainty in the distribution for the difference between tPA and SK groups is greater than the uncertainty in the contrasts between either tPA or SK groups and the group with SK + tPA. This is because in our parameterization of the model the reference group (SK + tPA) doesn't get its own prior, but rather is only influenced by the intercept. The prior probability of 30-day mortality for the other two groups (tPA and SK), on the other hand, is influenced by both the intercept and the $\beta$ terms. So our parameterization has inherently made the assumption that we are less certain at baseline about the prior for the tPA and SK groups, and more certain about the prior for the SK + tPA (reference) group. We know this isn't true, and in fact in *Statistical Rethinking*, Richard McElreath advocates for using an index variable approach to avoid this issue (i.e., over parameterizing the model such that each group of a factor variable has its own coefficient and thus prior). I did try this approach, however inefficiencies in sampling (I think) made it impractical for this exercise (drastically increased run time, very small effective sample size). I would imagine this is due to the high degree of correlation between some of the terms in the over parameterized version of the model. Regardless, while our model parameterization does imply some less than ideal characteristics about our priors, the large sample size in our dataset will quickly wash out these minor differences.  
   
 The minor issues discussed above aside, we do need to work on these priors to make them a bit more informative and skeptical of unrealistic differences between groups. In the end I settled on $\beta \sim Normal(0, 0.5)$. Using this prior leads to the following prior predictive plots:  
   
-```{r, fig.align = "center", fig.height = 6, fig.width = 10}
+```{r, cache = FALSE, fig.align = "center", fig.height = 6, fig.width = 10}
 set.seed(11)
 intercept <- rnorm(10000, -2.5, 0.75)
 beta_1 <- rnorm(10000, 0, 0.5)
@@ -408,7 +409,7 @@ df <-
 
 plt_1 <- 
   ggplot(data = df, aes(x = diff_1)) + 
-  geom_density(fill = "darkblue") + 
+  geom_density(fill = "blue") + 
   labs(
     x = "abs[Pr(day30 = 1 | tx = SK + tPA) - Pr(day30 = 1 | tx = tPA)]",
     y = "Density",
@@ -591,12 +592,24 @@ diag_plot(model = m_base,
           ncol_trace = 3)
 ```  
   
-Our trace plots look good and all the Rhat values = 1. Our effective N / N ratios aren't great here, though. That said, we still have over 1000 effective samples for each parameter which is more than enough to get a good posterior sample. Truth be told, I'm not sure why this particular parameterization causes this problem, but we'll see in the next model that with added terms our sampling efficiency improves dramatically.  
+Our trace plots look good and all the Rhat values are essentially 1. Our effective N / N ratios aren't great here, though. That said, we still have over 1000 effective samples for each parameter which is more than enough to get a good posterior sample. Truth be told, I'm not sure why this particular parameterization causes this problem, but we'll see in the next model that with added terms our sampling efficiency improves dramatically.  
   
 ### Results  
-From this base model we can look at some of our treatment estimates. Here we plot the distribution of predicted probabilities of 30-day mortality for patients receiving either tPA or SK on the probability scale. We also plot the contrast between these two distributions (tPA - SK) which represents the distribution of predicted ARR. Finally, we can plot the risk ratio for tPA vs. SK by dividing the tPA distribution by the SK distribution. Each distribution is displayed with an 89% credible interval.  
+From this base model we can look at some of our treatment effect estimates. First we can use the *brms* **marginal_effects()** function to display the marginal effect estimates for our model's variables (only tx in this case).  
   
-```{r base model prob plots, fig.width = 4, fig.height = 4}
+```{r, eval = FALSE}
+base_plots <- 
+  plot(marginal_effects(m_cont))
+base_plots$`tx`$labels$y <- "Pr(day30 = 1)"
+base_plots$`tx`$theme <- base_theme
+```
+```{r, fig.width = 3, fig.height = 3, fig.align = "center"}
+plot(base_plots$`tx`)
+```  
+  
+If we want to get a bit more detailed, we can plot the entire distribution of predicted probabilities of 30-day mortality for patients receiving either tPA or SK on the probability scale. We can then also plot the contrast between these two distributions (tPA - SK) which represents the distribution of predicted ARR. Finally, we can plot the risk ratio for tPA vs. SK. Each distribution below is displayed with an 89% credible interval.  
+  
+```{r base model prob plots, cache = FALSE, fig.width = 4, fig.height = 4}
 post_probs <- 
   posterior_samples(m_base) %>%
   as_tibble() %>%
@@ -640,7 +653,7 @@ arr_plt <-
       x = value,
       y = 0
     ),
-    fill = "darkblue",
+    fill = "blue",
     .width = 0.89
   ) + 
   labs(
@@ -685,7 +698,7 @@ These results are well aligned with the primary findings of the GUSTO-I trial wh
 Next let's add in some of our predictors. We'll add the categorical variables first.  
   
 ## Categorical Model  
-We'll now add in the three baseline categorical variables in the dataset: (1) Killip class (a risk stratification score); (2) history of previous MI; and (3) location of MI. Now that we have additional categorical variables, each with their own reference class, our intercept represents the log odds of 30-day mortality in patients receiving SK + tPA who are Killip class I, have not had a prior MI, with a new MI in the inferior wall of the heart. While this may slightly change our prior for the intercept it won't make a major difference and I'll leave it consistent with the base model. We'll also continue to use the same prior for our new $\beta$ coefficients as well.  
+We'll now add in the three baseline categorical variables in the dataset: (1) Killip class (a categorization of heart failure symptoms); (2) history of previous MI; and (3) location of MI. Now that we have additional categorical variables, each with their own reference class, our intercept represents the log odds of 30-day mortality in patients receiving SK + tPA who are Killip class I, have not had a prior MI, with a new MI in the inferior wall of the heart. While this may slightly change our prior for the intercept it won't make a major difference and I'll leave it consistent with the base model. We'll also continue to use the same prior for our new $\beta$ coefficients as well.  
   
 ```{r, cache = TRUE, include = TRUE, echo = TRUE, eval = FALSE}
 m_cat <-
@@ -757,8 +770,30 @@ waic_plot(w)
 <br>  
 Based on the above plot we can conclude that the categorical model represents an improvement over the base model with respect to predicted out of sample performance.  
   
+### Results  
+  
+Here are the marginal effect estimates from our categorical model.  
+<br>
+```{r, eval = FALSE}
+cat_plots <- 
+  plot(marginal_effects(m_cat)
+cat_plots$`tx`$labels$y <- "Pr(day30 = 1)"
+cat_plots$`tx`$theme <- base_theme
+cat_plots$`Killip`$labels$y <- "Pr(day30 = 1)"
+cat_plots$`Killip`$theme <- base_theme
+cat_plots$`pmi`$labels$y <- "Pr(day30 = 1)"
+cat_plots$`pmi`$theme <- base_theme
+cat_plots$`miloc`$labels$y <- "Pr(day30 = 1)"
+cat_plots$`miloc`$theme <- base_theme
+```
+```{r, fig.align = "center", fig.width = 8, fig.height = 6}
+plot_grid(cat_plots$`tx`, cat_plots$`Killip`,
+          cat_plots$`miloc`, cat_plots$`pmi`,
+          ncol = 2, align = "hv", axis = "b")
+```  
+  
 ## Continuous Model  
-Next we can add the continuous (scaled and centered) variables to our model.  
+Next we can add the continuous (scaled and centered) variables to our model. The same $\beta$ coefficients will apply here, except now these coefficients tell us about the expected change in log odds of 30-day mortality with a one SD change in the centered/scaled continuous variable.  
   
 ```{r categorical model, echo = TRUE, cache = TRUE, include = TRUE, eval = FALSE}
 m_cont <-
@@ -813,9 +848,37 @@ w <- loo_compare(m_base, m_cat, m_cont, criterion = "waic")
 waic_plot(w)
 ```  
   
+### Results 
+Here are the marginal effect estimates for the continous model. Note the rather drastic changes in predicted risk for the three continuous variables at one particular end of their range.  
+<br>
+```{r, eval = FALSE}
+cont_plots <- 
+  plot(marginal_effects(m_cont)
+cont_plots$`tx`$labels$y <- "Pr(day30 = 1)"
+cont_plots$`tx`$theme <- base_theme
+cont_plots$`age_s`$labels$y <- "Pr(day30 = 1)"
+cont_plots$`age_s`$theme <- base_theme
+cont_plots$`sbp_s`$labels$y <- "Pr(day30 = 1)"
+cont_plots$`sbp_s`$theme <- base_theme
+cont_plots$`pulse_s`$labels$y <- "Pr(day30 = 1)"
+cont_plots$`pulse_s`$theme <- base_theme
+cont_plots$`Killip`$labels$y <- "Pr(day30 = 1)"
+cont_plots$`Killip`$theme <- base_theme
+cont_plots$`pmi`$labels$y <- "Pr(day30 = 1)"
+cont_plots$`pmi`$theme <- base_theme
+cont_plots$`miloc`$labels$y <- "Pr(day30 = 1)"
+cont_plots$`miloc`$theme <- base_theme
+```
+```{r, fig.align = "center", fig.width = 10, fig.height = 10}
+plot_grid(cont_plots$`tx`, cont_plots$`age_s`, cont_plots$`pulse_s`,
+          cont_plots$`sbp_s`, cont_plots$`Killip`,
+          cont_plots$`miloc`, cont_plots$`pmi`,
+          ncol = 3, align = "hv", axis = "b")
+```  
+  
 ## Spline Model  
   
-Now we'll extend our current model by using thin plate splines to model the continuous variables, allowing for a non-linear relationship between these variables and the log odds of 30-day mortality.  
+Now we'll extend our current model by using thin plate splines to model the continuous variables, allowing for a non-linear relationship between these variables and the log odds of 30-day mortality. I've used $Exponential(1)$ as the prior for the spline standard deviation terms and kept the remainder of the priors the same.      
   
 ```{r spline model, echo = TRUE, include = TRUE, eval = FALSE}
 m_spline <-
@@ -877,9 +940,77 @@ waic_plot(w)
   
 Here we see that modeling our continuous variables using splines provided an incremental (albeit less extreme than the previous models) improvement in predicted out of sample performance.  
   
+### Results  
+  
+In the marginal effect plots for this model we see some changes in the relationship between our three continuous variables and predicted risk, particularly at the ends of their ranges.  
+<br>
+```{r, eval = FALSE}
+spline_plots <- 
+  plot(marginal_effects(m_spline)
+spline_plots$`tx`$labels$y <- "Pr(day30 = 1)"
+spline_plots$`tx`$theme <- base_theme
+spline_plots$`age_s`$labels$y <- "Pr(day30 = 1)"
+spline_plots$`age_s`$theme <- base_theme
+spline_plots$`sbp_s`$labels$y <- "Pr(day30 = 1)"
+spline_plots$`sbp_s`$theme <- base_theme
+spline_plots$`pulse_s`$labels$y <- "Pr(day30 = 1)"
+spline_plots$`pulse_s`$theme <- base_theme
+spline_plots$`Killip`$labels$y <- "Pr(day30 = 1)"
+spline_plots$`Killip`$theme <- base_theme
+spline_plots$`pmi`$labels$y <- "Pr(day30 = 1)"
+spline_plots$`pmi`$theme <- base_theme
+spline_plots$`miloc`$labels$y <- "Pr(day30 = 1)"
+spline_plots$`miloc`$theme <- base_theme
+```
+```{r, fig.align = "center", fig.width = 10, fig.height = 10}
+plot_grid(spline_plots$`tx`, spline_plots$`age_s`, spline_plots$`pulse_s`,
+          spline_plots$`sbp_s`, spline_plots$`Killip`,
+          spline_plots$`miloc`, spline_plots$`pmi`,
+          ncol = 3, align = "hv", axis = "b")
+```  
+  
 ## Interaction Model  
   
-Here we have fit a full interaction model (treatment x covariate interactions for all 6 covariates).  
+Next we will fit a full interaction model (treatment x covariate interactions for all 6 covariates). In Dr. Harrell's post, this is the point at which penalized maximum likelihood estimation is used to shrink the interaction coefficients in an effort to avoid overfitting. In our case, we will instead use our priors to employ regularization. Prior selection for regularization/shrinkage in this scenario is far beyond my current knowledge base, but will play an important role in the future implemention of these types of models. For our purposes here, rather than get into the weeds with more complicated regularizing priors (Cauchy, Horseshoe, etc.), we'll use a more restrictive version of the $\beta$ prior we've been using: $\beta_{interaction} \sim Normal(0, 0.1)$.  
+  
+```{r, cache = FALSE, fig.align = "center", fig.width = 8, fig.height = 2}
+set.seed(11)
+df <- tibble(beta = rnorm(10000, 0, 0.1))
+
+plt_1 <- 
+  ggplot(data = df, aes(x = beta)) + 
+  geom_density(fill = "blue") + 
+  labs(
+    x = "Interaction Beta (Log Odds)",
+    y = "Density",
+    subtitle = "Prior Distribution (Interaction Coefficient)"
+  ) + 
+  scale_x_continuous(limits = c(-1, 1)) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+  
+plt_2 <- 
+  ggplot(data = df, aes(x = exp(beta))) + 
+  geom_density(fill = "darkgreen") + 
+  labs(
+    x = "Interaction Beta (Odds Ratio)",
+    y = "Density",
+    subtitle = "Prior Distribution (Interaction Coefficient)"
+  ) + 
+  scale_x_continuous(limits = c(0.5, 1.5)) +
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+    
+plot_grid(plt_1, plt_2, ncol = 2, align = "hv")  
+```  
+  
+The prior predictive plots above show us that this prior is skeptical of very large interaction effects. On the left we've plotted the simulated prior on the log odds scale and on the right on the OR scale. In reality this prior could probably be much more narrow, but it will work for our purposes moving forward. We fit the full model below:  
   
 ```{r interaction model, echo = TRUE, cache = TRUE, include = TRUE, eval = FALSE}
 m_int <-
@@ -979,11 +1110,94 @@ w <- loo_compare(m_base, m_cat, m_cont, m_spline, m_int, criterion = "waic")
 waic_plot(w)
 ```  
   
-For the first time it appears that the change in our model did **not** provide a meaningful change in WAIC. While we did use *somewhat* narrow priors, the amount of regularization provided by $\beta_{interaction} \sim Normal(0, 0.1)$ shouldn't preclude a real interaction effect present in the data from effectively shining through in the final posterior distribution. Thus, we can take this as evidence *against* true HTE (on the relative scale).  
+For the first time it appears that the change in our model did **not** provide a meaningful change in WAIC. While we did use *somewhat* narrow priors, the amount of regularization provided by $\beta_{interaction} \sim Normal(0, 0.1)$ shouldn't preclude a real interaction effect present in the data from effectively shining through in the final posterior distribution. Thus, we can take this as evidence *against* true systematic HTE (on the relative scale).  
+  
+### Results  
+While the lack of improvement in WAIC is evidence against HTE, we can also examine the posterior distributions of the interaction parameters to get a sense for the uncertainty in these estimates. In the ridgeline plot below, each distribution is an interaction parameter. Those with a leading "b_" are the categorical interaction terms, while those with a leading "bs_" are the continuous spline interaction terms.  
+<br>
+```{r, fig.height = 6, fig.width = 5, fig.align = "center"}
+color_scheme_set("purple")
+mcmc_areas_ridges(as.array(m_int), pars = c("b_txSK:KillipII",
+                                            "b_txSK:KillipIII",
+                                            "b_txSK:KillipIV",
+                                            "b_txtPA:KillipII",
+                                            "b_txtPA:KillipIII",
+                                            "b_txtPA:KillipIV",
+                                            "b_txSK:pmiyes",
+                                            "b_txtPA:pmiyes",
+                                            "b_txSK:milocOther",
+                                            "b_txtPA:milocOther",
+                                            "b_txSK:milocAnterior",
+                                            "bs_sage_s:txSKPtPA_1",
+                                            "bs_sage_s:txSK_1",
+                                            "bs_sage_s:txtPA_1",
+                                            "bs_spulse_s:txSKPtPA_1",
+                                            "bs_spulse_s:txSK_1",
+                                            "bs_spulse_s:txtPA_1",
+                                            "bs_ssbp_s:txSKPtPA_1",
+                                            "bs_ssbp_s:txSK_1",
+                                            "bs_ssbp_s:txtPA_1")) + 
+  labs(x = "Estimate") + 
+  geom_vline(xintercept = 0, linetype = "dashed",
+             color = "black") + 
+  base_theme 
+```  
+  
+All of the continuous interaction terms are centered on zero and with the exception of 2 or 3 small deviations, all of the categorical interaction terms are centered on zero. From this plot we don't see any strong evidence for HTE.  
+  
+We can also look at the marginal effect plots from our model to examine the magnitude of interaction present from the perspective of the outcome.   
+<br>
+```{r, eval = FALSE}
+int_plots <- 
+  plot(marginal_effects(m_int, effects = c("age_s:tx", "pulse_s:tx",
+                                           "sbp_s:tx", "Killip:tx",
+                                           "pmi:tx", "miloc:tx")))
+int_plots$`age_s:tx`$labels$y <- "Pr(day30 = 1)"
+int_plots$`age_s:tx`$theme <- base_theme
+int_plots$`sbp_s:tx`$labels$y <- "Pr(day30 = 1)"
+int_plots$`sbp_s:tx`$theme <- base_theme
+int_plots$`pulse_s:tx`$labels$y <- "Pr(day30 = 1)"
+int_plots$`pulse_s:tx`$theme <- base_theme
+int_plots$`Killip:tx`$labels$y <- "Pr(day30 = 1)"
+int_plots$`Killip:tx`$theme <- base_theme
+int_plots$`pmi:tx`$labels$y <- "Pr(day30 = 1)"
+int_plots$`pmi:tx`$theme <- base_theme
+int_plots$`miloc:tx`$labels$y <- "Pr(day30 = 1)"
+int_plots$`miloc:tx`$theme <- base_theme
+```
+```{r, fig.align = "center", fig.width = 10, fig.height = 8}
+plot_grid(int_plots$`age_s:tx`, int_plots$`pulse_s:tx`,
+          int_plots$`sbp_s:tx`, int_plots$`Killip:tx`,
+          int_plots$`miloc:tx`, int_plots$`pmi:tx`,
+          ncol = 2, align = "hv", axis = "b")
+```  
+  
+We can see from these plots what we might have expected based on the previous ridgeline plot. There is no interaction occuring between the continuous variables and treatment, and any interaction occuring between the categorical variables and treatment is small.  
   
 ## Subgroups Model  
   
-Another way to approach the question of HTE is to *a priori* define subgroups of patients that are hypothesized to be good candidates for HTE. For the purposes of this project I created a set of 8 unique subgroups by based on centered/scaled age (> or < 0), Killip score (I & II or III & IV) and history of previous MI (yes and no). We can then use a multilevel model, where the intercept and treatment effect is clustered on subgroup. In this parameterization we can take advantage of the "partial pooling" effect whereby estimates for the intercept and treatment effect coefficients are shrunk towards the overall mean effect in the entire population. (ADD MORE HERE!!)  
+Another way to approach the question of HTE is to define subgroups of patients *a priori* that are hypothesized to be good candidates for HTE. For the purposes of this project I created a set of 8 unique subgroups by based on centered/scaled age (w/ cut point at 0), Killip score (I & II or III & IV) and history of previous MI (yes and no). We can then use a multilevel (hierarchical random effects) model, where the intercept and treatment effect estimates are clustered on subgroup. In this parameterization we can take advantage of the "partial pooling" effect whereby estimates for the intercept and treatment effect coefficients are shrunk towards the respective grand mean estimates in the entire population. For this model we have a new prior to define: the correlation matrix for the intercept/treatment effect coefficients. For this prior we'll use $R \sim LKJ(2)$, a somwhat informative prior that is generally skeptical of extreme correlation values (i.e., those very close to -1 or 1). The prior predictive plot below shows the prior distribution of $\rho$ values implied by this prior:  
+  
+```{r, fig.align = "center", fig.width = 3, fig.height = 2}
+df <- tibble(rho = 
+               rethinking::rlkjcorr(10000, K = 3, eta = 2)[, , 1][, 2])
+
+ggplot(data = df, aes(x = rho)) + 
+  geom_density(fill = "purple") + 
+  labs(
+    x = "Rho",
+    y = "Density",
+    subtitle = "Prior Distribution (Rho)"
+  ) + 
+  base_theme + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+    
+```  
+  
+Using this prior (along with the same priors used in previous models) we'll fit the multilevel model in *brms*.  
   
 ```{r random effects model, echo = TRUE, cache = TRUE, include = TRUE, eval = FALSE}
 m_random <-
@@ -1039,6 +1253,8 @@ diag_plot(model = m_random,
           ncol_trace = 7)
 ```  
   
+Again we have no major issues on our diagnostic plots.  
+  
 ### Comparison  
   
 ```{r, cache = FALSE, fig.align = "center", fig.width = 5, fig.height = 2}
@@ -1047,9 +1263,11 @@ w <- loo_compare(m_base, m_cat, m_cont, m_spline, m_int, m_random, criterion = "
 waic_plot(w)
 ```  
   
+Once again we don't notice an appreciable change in WAIC for this model when compared to the spline model. If these subgroups were *a priori* hypothesized to have differential treatment effects, this would be evidence *against* true HTE.  
+  
 ## Cluster Model  
   
-We can also use unsupervised clustering to derive our subgroups. (ADD MORE HERE!)  
+We can also use unsupervised clustering to derive our subgroups *a priori*. This approach was used by [Fernando Zampieri and colleagues](https://www.sciencedirect.com/science/article/pii/S0007091219301825) to investigate HTE in ARDS therapies. First we employ a clustering technique (in this case, *Kamiila* which may be better suited for mixed data such as the GUSTO dataset) and identify the *optimal* number of clusters. In their analysis, Zampieri at team used cross validated prediction strength to identify the optimal number of clusters. I won't go into more detail here, but certainly the clustering process plays a very important role in these sorts of approaches. For our project, I've arbitrarily selected 3 as the optimal number of clusters, and run the *kamila* algorithm on the GUSTO dataset. We can then use cluster membership to partially pool intercept and treatment effect estimates in a manner identical to our previous multilevel model approach. We'll use all of the same priors for this model.  
   
 ```{r, echo = TRUE, include = TRUE, eval = FALSE}
 cont_vars <- 
@@ -1121,6 +1339,8 @@ diag_plot(model = m_clust,
           ncol_trace = 7)
 ```  
   
+There are no major issues on these diagnostic plots.  
+  
 ### Comparison  
   
 ```{r, cache = FALSE, fig.align = "center", fig.width = 5, fig.height = 2}
@@ -1129,9 +1349,161 @@ w <- loo_compare(m_base, m_cat, m_cont, m_spline, m_int, m_random, m_clust, crit
 waic_plot(w)
 ```  
   
+Again we see no incremental improvement in WAIC with this approach, and could use this as evidence against true HTE (on the relative scale) in our identified clusters.  
+  
+So, we now have a few models to use as we embark on the next section of the project: estimation of patient specific efficacy estimates. While the interaction model did not show improvement in WAIC, we'll use this model moving forward to allow our relative treatment effect estimates to at potentially vary with patient characteristics.    
+  
 # Patient Specific Efficacy Estimates
+  
+First let's get a sense for the distribution of treatment effects implied by our interaction model for the study population. For each patient in the trial, we can draw all samples (n = 4000) from the posterior distribution, and determine their predicted probability of 30-day mortality by taking the median of these values. We can then plot the distribution of these median probabilities of 30-day mortality either as absolute risks (under tPA and SK), absolute risk reductions (SK - tPA), risk ratios or odds ratios.  
+  
+```{r, cache = TRUE, eval = FALSE}
+fitted_int <- 
+  tibble(
+    sk = fitted(m_int, newdata = gusto %>% mutate(tx = "SK"), 
+                robust = TRUE)[, 1],
+    tpa = fitted(m_int, newdata = gusto %>% mutate(tx = "tPA"), 
+                 robust = TRUE)[, 1],
+    arr = sk - tpa,
+    rr = tpa / sk,
+    or = exp(qlogis(tpa) - qlogis(sk))
+  )
+```
+```{r, cache = FALSE}
+plt_1 <-
+  ggplot(data = fitted_int) + 
+  geom_halfeyeh(aes(y = 1, x = sk), fill = "darkred", .width = 0.89) + 
+  base_theme + 
+  labs(
+    x = "Pr(day30 = 1 | tx = SK)",
+    y = "Density",
+    subtitle = "Absolute Predicted Risk w/ SK"
+  ) + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
 
-```{r}
+plt_2 <-
+  ggplot(data = fitted_int) + 
+  geom_halfeyeh(aes(y = 1, x = tpa), fill = "darkred", .width = 0.89) + 
+  base_theme + 
+  labs(
+    x = "Pr(day30 = 1 | tx = tPA)",
+    y = "Density",
+    subtitle = "Absolute Predicted Risk w/ tPA"
+  ) + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+plt_3 <-
+  ggplot(data = fitted_int) + 
+  geom_halfeyeh(aes(y = 1, x = arr), fill = "blue", .width = 0.89) + 
+  base_theme + 
+  labs(
+    x = "Absolute Risk Reduction (SK - tPA)",
+    y = "Density",
+    subtitle = "Absolute Risk Reduction"
+  ) + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+plt_4 <-
+  ggplot(data = fitted_int) + 
+  geom_halfeyeh(aes(y = 1, x = rr), fill = "darkgreen", .width = 0.89) + 
+  base_theme + 
+  labs(
+    x = "Risk Ratio (tPA / SK)",
+    y = "Density",
+    subtitle = "Risk Ratio"
+  ) + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+plt_5 <-
+  ggplot(data = fitted_int) + 
+  geom_halfeyeh(aes(y = 1, x = or), fill = "purple", .width = 0.89) + 
+  base_theme + 
+  labs(
+    x = "Odds Ratio (tPA vs. SK)",
+    y = "Density",
+    subtitle = "Odds Ratio"
+  ) + 
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+```
+```{r, cache = FALSE, fig.align = "center", fig.height = 3, fig.width = 8}
+plot_grid(plt_1, plt_2, ncol = 2, align = "hv", axis = "l")
+```
+<br>
+```{r, cache = FALSE, fig.align = "center", fig.height = 3, fig.width = 8}
+plot_grid(plt_3, plt_4, plt_5, ncol = 3, align = "hv", axis = "b")
+```  
+  
+Here we see that the most density for median patient ARR is centered between 0 and 4%, with some values falling below 0 (i.e., risk is higher with tPA vs. SK) and some extend as far out as 8%. On the relative scale, the majority of the density for median patient RR falls between 0.7 and 0.9, although some values do cross 1. Likewise, the bulk of the density for median patient OR falls between 0.7 and 0.9, again with some values falling above 1.  
+  
+We can also look at how our model's predicted median risks on the absolute (ARR) and relative scales (RR and OR) vary with respect to predicted absolute baseline risk (under SK).  
+  
+```{r, cache = FALSE, fig.align = "center", fig.width = 10, fig.height = 3}
+plt_1 <-
+  ggplot(fitted_int, aes(x = sk, y = arr)) + 
+  geom_point(alpha = 0.1) + 
+  geom_smooth(color = "blue") +
+  labs(
+    x = "P(Day 30 = 1 | tx = SK)",
+    y = "Predicted ARR",
+    subtitle = "ARR vs. Baseline Risk"
+  ) + 
+  base_theme
+
+plt_2 <-
+  ggplot(fitted_int, aes(x = sk, y = rr)) + 
+  geom_point(alpha = 0.1) + 
+  geom_smooth(color = "darkgreen") +
+  scale_y_continuous(limits = c(0.6, 1.2)) + 
+  labs(
+    x = "P(Day 30 = 1 | tx = SK)",
+    y = "Predicted RR",
+    subtitle = "RR vs. Baseline Risk"
+  ) + 
+  base_theme
+
+plt_3 <-
+  ggplot(fitted_int, aes(x = sk, y = or)) + 
+  geom_point(alpha = 0.1) + 
+  geom_smooth(color = "purple") +
+  labs(
+    x = "P(Day 30 = 1 | tx = SK)",
+    y = "Predicted OR",
+    subtitle = "OR vs. Baseline Risk"
+  ) + 
+  scale_y_continuous(limits = c(0.6, 1.2)) + 
+  base_theme
+
+plot_grid(plt_1, plt_2, plt_3, ncol = 3, align = "hv", axis = "b")
+```  
+  
+Here we see that as baseline risk increases, we have an initial rise in predicted ARR followed by a downturn after a predicted baseline risk of ~50%. In the relative measures, we see some small deviations in the early risk range, followed by a slow rise over the remainder of the range. This rise is more pronounced for RR than OR, with RR.  
+  
+These plots (and the previous ones) are informative, but they don't fully capture the true variability that is present in these values. Each patient's predicted values have been summarized by the median, when in fact we know that each patient has a distribution of predicted values (ARR, RR, OR, etc.). To get a sense for some of the within-patient variaiblity implied by our interaction model, we can evaluate the predicted risks for several "mock patients" with varying vectors of baseline characteristics. We'll look at the following four hypothetical patients:  
+  
+1. An average age patient (age_s = 0) with history of a previous MI (pmi = yes) who presents with a new anterior wall MI (miloc = Anterior), Killip class 2 HF symptoms (Killip = II), an average pulse (pulse_s = 0) but a much lower than average blood pressure (sbp_s = -1.5).
+  
+2. An old (age_s = 2) patient without history of previous MI (pmi = no) who presents with a new inferior wall MI (miloc = Inferior), Killip class 2 HF symptoms (Killip = II), a moderately elevated blood pressure (sbp_s = 0.5) and a very fast heart rate (pulse_s = 2).  
+  
+3. An average age patient (age_s = 0) without history of previous MI (pmi = no) who presents with a new inferior wall MI (miloc = Inferior), Killip class 3 HF symptoms (Killip = III) and an average pulse and blood pressure (pulse_s = 0, sbp_s = 0).  
+  
+4. A patient of above average age (age_s = 0.5) with a history of previous MI (pmi = yes) who presents with a new MI in neither the anterior nor inferior walls (miloc = Other), Killip class 2 HF symptoms (Killip = 2), a moderately elevated pulse (pulse_s = 0.5) and a moderately reduced blood pressure (sbp_s = -0.5). 
+  
+```{r, eval = FALSE}
 patient_estimate <- 
   function(age_s, pulse_s, sbp_s, Killip, pmi, miloc,
            label = "pt_1", draws = 4000) {
@@ -1166,31 +1538,69 @@ patient_estimate <-
     
   }
 ```  
-  
-```{r}
-vals <- patient_estimate(age_s = c(1, 0), pulse_s = c(0, 0), sbp_s = c(-0.5, 0), Killip = c("IV", "I"), pmi = c("yes", "no"), miloc = c("Anterior", "Inferior"), label = c("pt_high", "pt_low"))
-
+```{r, eval = FALSE}
+vals <- patient_estimate(age_s = c(0, 2, 0, 0.5), 
+                         pulse_s = c(0, 2, 0, 0.5), 
+                         sbp_s = c(-1.5, 0.5, 0, -0.5), 
+                         Killip = c("II", "II", "III", "II"), 
+                         pmi = c("yes", "no", "no", "yes"), 
+                         miloc = c("Anterior", "Inferior", "Inferior", "Other"), 
+                         label = c("pt_1", "pt_2", "pt_3", "pt_4"))
+```
+```{r, cache = FALSE, fig.align = "center", fig.width = 8, fig.height = 4}
 plt_1 <- 
-  ggplot(data = vals %>% select(label, sk_risk, tpa_risk) %>%
-           gather("key", "value", -label)) + 
-  geom_halfeyeh(aes(x = value, y = key)) + 
-  facet_wrap(~label, scales = "free") +
-  base_theme + 
-  theme(
-    axis.text.y = element_blank(),
-    axis.ticks.y = element_blank()
-  )
+  ggplot(data = vals) + 
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +  
+  geom_halfeyeh(aes(x = arr, y = label), fill = "blue", .width = 0.89) + 
+  scale_y_discrete(labels = c("Patient 1", "Patient 2", "Patient 3", "Patient 4")) + 
+  scale_x_continuous(limits = c(-0.15, 0.15)) + 
+  labs(
+    x = "Predicted Absolute Risk Reduction",
+    y = NULL,
+    subtitle = "Absolute Risk Reduction"
+  ) + 
+  base_theme
 
 plt_2 <- 
   ggplot(data = vals) + 
-  geom_halfeyeh(aes(x = arr, y = label)) + 
-  base_theme + 
-  theme(
-    axis.text.y = element_blank(),
-    axis.ticks.y = element_blank()
-  )
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey50") +  
+  geom_halfeyeh(aes(x = rr, y = label), fill = "darkgreen", .width = 0.89) + 
+  scale_y_discrete(labels = c("Patient 1", "Patient 2", "Patient 3", "Patient 4")) + 
+  scale_x_continuous(limits = c(0.4, 1.75)) + 
+  labs(
+    x = "Predicted Risk Ratio",
+    y = NULL,
+    subtitle = "Risk Ratio"
+  ) + 
+  base_theme
 
-```
+plt_3 <- 
+  ggplot(data = vals) + 
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey50") +  
+  geom_halfeyeh(aes(x = or, y = label), fill = "purple", .width = 0.89) + 
+  scale_y_discrete(labels = c("Patient 1", "Patient 2", "Patient 3", "Patient 4")) + 
+  scale_x_continuous(limits = c(0.4, 1.75)) + 
+  labs(
+    x = "Predicted Odds Ratio",
+    y = NULL,
+    subtitle = "Odds Ratio"
+  ) + 
+  base_theme
+
+plot_grid(plt_1, plt_2, plt_3, ncol = 3, align = "hv", axis = "b")
+```  
+  
+These plots are very illuminating in regard to patient-specific efficacy predictions on both the relative and absolute scale, and the ability to present visualizations of these estimates (along with their inherent uncertainty). We see instances of patients with similar predicted relative efficacies with very different (or more/less uncertain) predicted absolute efficacies. Likewise we see instances of patients with different relative efficacy estimates and how they translate to the absolute scale.  
+  
+## Conclusions
+Regardless of the presence of differential treatment effects on the relative scale, patients have inherently different risks for mortality (or any study outcome) at baseline. These risks, and their distributions, can be predicted from our model and presented to both clinicians and patients, allowing for more informed decision making. Furthermore, by retaining the full posterior distribution, no premature decisions on the value system of a patient or clinical scenario are made by the analysis. Rather, those individuals making the decision are presented with a complete set of information that they can use as is appropriate for their given situation.
+
+  
+
+
+
+
+
 
 
 
