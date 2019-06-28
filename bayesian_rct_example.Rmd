@@ -1493,7 +1493,7 @@ plt_3 <-
 plot_grid(plt_1, plt_2, plt_3, ncol = 3, align = "hv", axis = "b")
 ```  
   
-Here we see that as baseline risk increases, we have an initial rise in predicted ARR followed by a downturn after a predicted baseline risk of ~50%. In the relative measures, we see some small deviations in the early risk range, followed by a slow rise over the remainder of the range. This rise is more pronounced for RR than OR, with RR.  
+Here we see that as baseline risk increases, we have an initial rise in predicted ARR followed by a downturn after a predicted baseline risk of ~50%. In the relative measures, we see some small deviations in the early risk range, followed by a slow rise over the remainder of the range. This rise is more pronounced for RR than OR.  
   
 These plots (and the previous ones) are informative, but they don't fully capture the true variability that is present in these values. Each patient's predicted values have been summarized by the median, when in fact we know that each patient has a distribution of predicted values (ARR, RR, OR, etc.). To get a sense for some of the within-patient variability implied by our interaction model, we can evaluate the predicted risks for several "mock patients" with varying vectors of baseline characteristics. We'll look at the following four hypothetical patients:  
   
